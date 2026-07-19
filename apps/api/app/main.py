@@ -25,7 +25,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Coach IA API", version="2.2.1", lifespan=lifespan)
+app = FastAPI(title="Coach IA API", version="2.3.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -91,11 +91,27 @@ class SessionSummary(Session):
     partial_hands: int = 0
 
 
+class HandReviewDetail(BaseModel):
+    tag: str = Field(default="", max_length=80)
+    difficulty: Literal["", "easy", "medium", "hard"] = ""
+    note: str = Field(default="", max_length=1000)
+
+
+class LobbyReviewValue(BaseModel):
+    players: str = Field(default="", max_length=30)
+    remaining: str = Field(default="", max_length=30)
+    average_stack: str = Field(default="", max_length=30)
+    prize: str = Field(default="", max_length=80)
+
+
 class ReviewState(BaseModel):
     notes: str = Field(default="", max_length=4000)
     hands: dict[str, Literal["approved", "rejected"]] = Field(default_factory=dict)
     lobby: dict[str, Literal["confirmed", "rejected"]] = Field(default_factory=dict)
     rabbits: dict[str, Literal["confirmed", "rejected"]] = Field(default_factory=dict)
+    hand_details: dict[str, HandReviewDetail] = Field(default_factory=dict)
+    lobby_values: dict[str, LobbyReviewValue] = Field(default_factory=dict)
+    finalized: bool = False
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -235,6 +251,19 @@ def save_review(session_id: UUID, review: ReviewState, user: str = Depends(requi
     temporary.write_text(review.model_dump_json(indent=2), encoding="utf-8")
     temporary.replace(path)
     return review
+
+
+@app.get("/v1/sessions/{session_id}/review/export")
+def export_review(session_id: UUID, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> Response:
+    review = get_review(session_id, user, database)
+    manifest = read_manifest(session_id) or {}
+    payload = {"session_id": str(session_id), "platform": "PPPoker", "post_session_only": True,
+               "review": review.model_dump(mode="json"),
+               "summary": manifest.get("hand_detection", {}).get("summary", {}),
+               "classification": manifest.get("classification", {}),
+               "exported_at": datetime.now(timezone.utc).isoformat()}
+    return Response(content=json.dumps(payload, ensure_ascii=False, indent=2), media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="review-{session_id}.json"'})
 
 
 @app.get("/v1/sessions/{session_id}/frames/{filename}")

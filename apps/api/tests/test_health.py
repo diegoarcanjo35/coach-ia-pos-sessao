@@ -33,3 +33,18 @@ def test_session_is_persisted_in_history() -> None:
         history = client.get("/v1/sessions")
         assert history.status_code == 200
         assert any(item["id"] == created["id"] for item in history.json())
+
+
+def test_review_is_persisted_and_exported() -> None:
+    with TestClient(app) as client:
+        client.post("/v1/auth/login", json={"email": "admin@test.local", "password": "test-password"})
+        session_id = client.post("/v1/sessions?tournament_name=Revisao").json()["id"]
+        payload = {"notes": "Revisar ICM", "hands": {"1": "approved"}, "lobby": {}, "rabbits": {},
+                   "hand_details": {"1": {"tag": "ICM", "difficulty": "hard", "note": "Bubble"}},
+                   "lobby_values": {}, "finalized": True}
+        saved = client.post(f"/v1/sessions/{session_id}/review", json=payload)
+        assert saved.status_code == 200
+        assert client.get(f"/v1/sessions/{session_id}/review").json()["hand_details"]["1"]["tag"] == "ICM"
+        exported = client.get(f"/v1/sessions/{session_id}/review/export")
+        assert exported.status_code == 200
+        assert exported.json()["post_session_only"] is True
