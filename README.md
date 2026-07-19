@@ -1,48 +1,107 @@
-# Coach IA Pós-Sessão — v2.0.0
+# Coach IA Pós-Sessão — v2.2.1
 
-Plataforma pós-sessão para upload e análise de gravações da PPPoker. Não oferece assistência durante partidas.
+SaaS de estudo técnico para gravações encerradas da PPPoker. O sistema não oferece assistência durante partidas e não deve ser utilizado como ferramenta em tempo real.
+
+## Estado atual
+
+- upload manual e autenticado de gravações encerradas;
+- processamento assíncrono com PostgreSQL, Redis, FFmpeg e worker dedicado;
+- classificação conservadora de mesa, Lobby, transição e tela desconhecida;
+- detecção de candidatos a mãos e geração de clipes individuais;
+- quarentena automática para mãos incompletas;
+- dashboard amplo, responsivo e organizado por abas;
+- histórico persistente das sessões;
+- OCR conservador para contexto do Lobby;
+- detecção de “pagou o Coelho” somente com evidência textual;
+- validação humana persistente de mãos, Lobby e Coelho;
+- observações salvas por sessão.
+
+## Regras de segurança do produto
+
+- análise exclusivamente após o encerramento da sessão;
+- nenhuma recomendação estratégica durante o jogo;
+- `unknown_until_evidenced`: dados sem evidência permanecem desconhecidos;
+- OCR do Lobby é marcado como não verificado até confirmação humana;
+- Coelho somente é confirmado automaticamente quando o texto contém `PAGOU` e `COELHO`;
+- cartas abertas pelo Coelho não são tratadas como streets com ação;
+- mãos parciais não entram automaticamente na futura análise técnica.
+
+## Arquitetura
+
+- `apps/web`: Next.js, React e TypeScript;
+- `apps/api`: FastAPI, autenticação e persistência das sessões;
+- `apps/worker`: FFmpeg, classificação visual, OCR e geração de clipes;
+- PostgreSQL: sessões e usuários;
+- Redis: fila de processamento;
+- Nginx: gateway público para Web e API;
+- Docker Compose: execução integrada dos serviços.
 
 ## Deploy na Abacus
 
-1. Clone o repositório no SuperComputer.
-2. Copie `.env.example` para `.env` e configure os segredos.
-3. Execute `docker compose up -d --build`.
-4. Verifique `http://localhost:3000/api/health` e `http://localhost:8000/health`.
-5. Na Abacus, execute `sh scripts/install-nginx-abacus.sh` para publicar apenas o gateway web.
+Após atualizar o repositório:
 
-O deploy usa apenas Git e Docker; não requer o Agent da Abacus.
+```bash
+cd ~/coach-ia-pos-sessao
+git pull --ff-only
+docker compose up -d --build api worker web
+docker compose ps
+docker compose logs --tail=80 api worker web
+```
 
-## Escopo desta versão
+Verificações locais:
 
-- upload manual de uma gravação encerrada;
-- criação e consulta de sessões;
-- fila assíncrona preparada para FFmpeg/OCR;
-- dashboard inicial sem qualquer assistência durante partidas.
-- acesso administrativo protegido por cookie HttpOnly;
-- upload autenticado e limitado por tamanho.
-- validação técnica assíncrona com `ffprobe` e manifesto por sessão.
-- segmentação temporal a cada 2 segundos com miniaturas de baixo custo;
-- política conservadora `unknown_until_evidenced` antes da classificação PPPoker.
-- dashboard amplo de revisão com progresso por etapa, clipes grandes e galeria de evidências;
-- OCR inicial do Lobby mantido como não verificado e confirmação de Coelho somente quando `PAGOU` e `COELHO` aparecem no texto;
-- separação explícita entre o runout de Coelho e as streets com ação estratégica.
-- pontuação de mudança visual e agrupamento de segmentos por histograma.
-- miniaturas autenticadas e acompanhamento do processamento no dashboard.
-- classificador calibrado para o layout vertical PPPoker v220 com evidências por frame.
-- detector pós-sessão de início/fim de mãos a 2 FPS, preservando interrupções de Lobby.
-- clipes individuais com pré-roll de 3 segundos e quarentena de candidatos incompletos.
-- histórico persistente no PostgreSQL, restauração de login e evidências de Lobby/Coelho.
+```bash
+curl http://localhost:8000/health
+curl http://localhost:3000/api/health
+```
 
-O pipeline de visão computacional ainda é um adaptador seguro: ele registra o trabalho,
-mas não inventa mãos ou decisões até que os detectores validados sejam integrados.
+O arquivo `.env` deve permanecer somente na Abacus e nunca deve ser enviado ao GitHub.
 
-## Lote v1.5
+## Fluxo atual
 
-- restauração automática do login após atualizar a página;
-- logout e cookie HttpOnly com duração de 12 horas;
-- sessões persistidas no PostgreSQL e importação dos uploads antigos;
-- histórico das 50 sessões mais recentes e retomada do painel;
-- clipes rápidos por keyframe, quarentena e reprodução autenticada;
-- eventos de Lobby agrupados por intervalo;
-- recortes de evidência para “pagou o Coelho”, sempre pendentes de OCR;
-- nenhuma evidência de Coelho é confirmada apenas por mudança visual.
+1. O jogador encerra a sessão.
+2. Envia a gravação vertical da PPPoker.
+3. O worker valida e segmenta o vídeo.
+4. As telas são classificadas.
+5. As mãos candidatas e os clipes são gerados.
+6. Lobby e Coelho são registrados como contexto separado.
+7. O jogador revisa, aprova ou descarta as evidências.
+8. As decisões e observações permanecem salvas após atualizar a página.
+
+## Evolução recente
+
+### v2.2.1
+
+- README sincronizado com a versão real do produto.
+
+### v2.2.0
+
+- aprovação e descarte de mãos;
+- confirmação ou rejeição de contexto do Lobby e eventos de Coelho;
+- observações persistentes por sessão;
+- correção da leitura do manifesto no histórico.
+
+### v2.1.0
+
+- navegação por abas;
+- lista visual de mãos completas;
+- clipes sincronizados com intervalos e confiança;
+- área separada de quarentena;
+- candidatos estruturados de jogadores, stack médio e premiação.
+
+### v2.0.1
+
+- cartões de OCR com alturas independentes;
+- texto bruto recolhido;
+- remoção de falsos cartões de Coelho em sessões novas e antigas.
+
+### v2.0.0
+
+- dashboard ampliado;
+- progresso detalhado do processamento;
+- galeria de evidências;
+- OCR inicial de Lobby e Coelho.
+
+## Limitações atuais
+
+O sistema ainda não extrai todas as ações, sizings, posições e cartas de cada mão. Até que os detectores sejam validados com evidências reais suficientes, nenhuma análise estratégica deve ser inventada ou apresentada como definitiva.
