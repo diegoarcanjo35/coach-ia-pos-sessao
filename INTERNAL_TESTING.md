@@ -1,8 +1,8 @@
-# Roteiro de testes internos — v3.0.0
+# Roteiro de testes internos — v3.1.0
 
 ## Preparação
 
-- confirme que o sistema informa `3.0.0-internal` nos health checks;
+- confirme que o sistema informa `3.1.0-ai-alpha` nos health checks;
 - entre com a conta administrativa já configurada na Abacus;
 - nunca compartilhe o `.env` ou a senha administrativa;
 - crie uma conta individual para cada testador.
@@ -35,6 +35,16 @@
 6. Salve observações da sessão.
 7. Atualize a página e confirme a persistência.
 8. Finalize a revisão somente quando não houver decisões pendentes.
+
+## IA visual alpha
+
+1. Use uma gravação curta com pelo menos uma mão completa.
+2. Aguarde a etapa **IA extraindo mãos**.
+3. Confira cartas do Hero e board contra os frames mostrados.
+4. Verifique posição, stack, pot e ações visíveis.
+5. Trate confiança baixa e `unknown` como comportamento correto quando a imagem estiver ambígua.
+6. Confirme que cartas do Coelho não aparecem como streets com ação.
+7. Registre qualquer divergência com o frame e a mão correspondentes.
 
 ## Gestão e exportação
 

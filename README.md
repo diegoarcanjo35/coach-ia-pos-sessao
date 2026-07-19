@@ -1,4 +1,4 @@
-# Coach IA Pós-Sessão — v3.0.0 Internal Beta
+# Coach IA Pós-Sessão — v3.1.0 AI Alpha
 
 SaaS de estudo técnico para gravações encerradas da PPPoker. O sistema não oferece assistência durante partidas e não deve ser utilizado como ferramenta em tempo real.
 
@@ -31,6 +31,11 @@ Esta edição é destinada a testes internos. Não contém preços, planos comer
 - criação, ativação, desativação e redefinição de senha pelo painel interno;
 - isolamento das sessões por proprietário;
 - senhas armazenadas com PBKDF2-SHA256 e salt individual.
+- seleção local de frames relevantes por mão completa;
+- extração multimodal estruturada de cartas, board, streets, pot, stack e ações visíveis;
+- cartas renderizadas visualmente no dashboard;
+- evidência e confiança associadas a cada extração;
+- falhas isoladas por mão e revisão obrigatória para campos duvidosos.
 
 ## Regras de segurança do produto
 
@@ -98,6 +103,16 @@ O roteiro completo de validação está em `INTERNAL_TESTING.md`.
 8. As decisões e observações permanecem salvas após atualizar a página.
 
 ## Evolução recente
+
+### v3.1.0 AI Alpha
+
+- integração pós-sessão com OpenAI Responses API;
+- Structured Outputs validados por Pydantic;
+- até cinco frames cronológicos enviados por mão completa;
+- respostas da API configuradas com `store=false`;
+- política explícita de `unknown` e proibição de conselho estratégico;
+- Coelho separado de streets e ações;
+- visualização de cartas, board, ações, confiança, alertas e frames originais.
 
 ### v3.0.0 Internal Beta
 

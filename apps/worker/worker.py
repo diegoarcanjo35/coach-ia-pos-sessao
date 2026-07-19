@@ -12,6 +12,8 @@ import numpy as np
 import re
 import unicodedata
 
+from ai_extractor import analyze_session
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 redis = Redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
 
@@ -311,13 +313,17 @@ def main() -> None:
             clips = create_hand_clips(video_path, hand_detection["hands"], float(metadata["duration_seconds"])) if hand_detection else []
             write_manifest(video_path, "reading_context", **common, hand_detection=hand_detection, clips=clips)
             context = build_context_evidence(video_path, timeline)
+            write_manifest(video_path, "ai_extracting", **common, hand_detection=hand_detection, clips=clips,
+                           lobby_context=context["lobby_events"], rabbit_detection=context["rabbit_detection"])
+            ai_analysis = analyze_session(video_path, hand_detection["hands"] if hand_detection else [])
             write_manifest(video_path, "clips_ready_for_review", session_id=job.get("id"), metadata=metadata, timeline=timeline,
                            segmentation={"interval_seconds": 2, "frame_count": len(timeline),
                                          "segment_count": max((int(item["segment_id"]) for item in timeline), default=0),
                                          "transition_threshold": 0.18, "policy": "unknown_until_evidenced"},
                            classification={"engine": "pppoker_vertical_v220", "counts": counts, "low_confidence_requires_review": True},
                            hand_detection=hand_detection, clips=clips,
-                           lobby_context=context["lobby_events"], rabbit_detection=context["rabbit_detection"])
+                           lobby_context=context["lobby_events"], rabbit_detection=context["rabbit_detection"],
+                           ai_analysis=ai_analysis)
             logging.info("Processamento concluído: %s (%s frames, %s clipes)", job.get("id"), len(timeline), len(clips))
         except Exception as exc:
             write_manifest(video_path, "failed", session_id=job.get("id"), error=str(exc))

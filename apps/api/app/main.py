@@ -25,7 +25,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Coach IA API", version="3.0.0-internal", lifespan=lifespan)
+app = FastAPI(title="Coach IA API", version="3.1.0-ai-alpha", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -442,6 +442,16 @@ def session_evidence(session_id: UUID, filename: str, user: str = Depends(requir
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Evidência não encontrada")
     return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
+
+
+@app.get("/v1/sessions/{session_id}/ai-evidence/{filename}")
+def session_ai_evidence(session_id: UUID, filename: str, user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> FileResponse:
+    ensure_session_owner(session_id, user, database)
+    if not filename.startswith("hand-") or "-frame-" not in filename or not filename.endswith(".jpg") or Path(filename).name != filename:
+        raise HTTPException(status_code=400, detail="Nome de evidência da IA inválido")
+    path = UPLOAD_DIR / str(session_id) / "ai-evidence" / filename
+    if not path.is_file(): raise HTTPException(status_code=404, detail="Evidência da IA não encontrada")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control":"private, max-age=300"})
 
 
 @app.post("/v1/uploads", response_model=Session, status_code=202)
