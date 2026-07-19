@@ -1,4 +1,5 @@
 import os
+from uuid import uuid4
 
 os.environ["DATABASE_URL"] = "sqlite+pysqlite:///./coach_ia_pytest.db"
 os.environ["AUTH_SECRET"] = "test-secret-long-enough"
@@ -60,3 +61,16 @@ def test_session_metadata_and_consolidated_export() -> None:
         exported = client.get("/v1/sessions/export")
         assert exported.status_code == 200
         assert any(item["id"] == session_id for item in exported.json()["sessions"])
+
+
+def test_admin_creates_internal_user_with_isolated_sessions() -> None:
+    email = f"player-{uuid4()}@test.local"
+    with TestClient(app) as client:
+        client.post("/v1/auth/login", json={"email": "admin@test.local", "password": "test-password"})
+        created = client.post("/v1/admin/users", json={"email": email, "password": "player-password", "role": "player"})
+        assert created.status_code == 201
+        client.post("/v1/auth/logout")
+        assert client.post("/v1/auth/login", json={"email": email, "password": "player-password"}).status_code == 200
+        own_session = client.post("/v1/sessions?tournament_name=Jogador").json()["id"]
+        assert any(item["id"] == own_session for item in client.get("/v1/sessions").json())
+        assert client.get("/v1/admin/users").status_code == 403

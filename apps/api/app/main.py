@@ -17,7 +17,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DatabaseSession
 
-from .database import SessionLocal, SessionRecord, get_database, initialize_database
+from .database import SessionLocal, SessionRecord, UserRecord, get_database, initialize_database
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -25,7 +25,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Coach IA API", version="2.4.0", lifespan=lifespan)
+app = FastAPI(title="Coach IA API", version="3.0.0-internal", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -48,6 +48,23 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class UserCreate(BaseModel):
+    email: str = Field(min_length=5, max_length=320)
+    password: str = Field(min_length=8, max_length=128)
+    role: Literal["admin", "player"] = "player"
+
+
+class UserPasswordReset(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
+
+
+class UserView(BaseModel):
+    email: str
+    role: Literal["admin", "player"]
+    active: bool
+    created_at: datetime
+
+
 class SessionMetadataUpdate(BaseModel):
     tournament_name: str | None = Field(default=None, max_length=255)
 
@@ -56,6 +73,22 @@ def _session_token(email: str) -> str:
     payload = base64.urlsafe_b64encode(email.encode()).decode().rstrip("=")
     signature = hmac.new(AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{signature}"
+
+
+def hash_password(password: str) -> str:
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 240_000)
+    return f"pbkdf2_sha256$240000${base64.urlsafe_b64encode(salt).decode()}${base64.urlsafe_b64encode(digest).decode()}"
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    try:
+        algorithm, rounds, salt, expected = encoded.split("$", 3)
+        if algorithm != "pbkdf2_sha256": return False
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode(), base64.urlsafe_b64decode(salt), int(rounds))
+        return hmac.compare_digest(base64.urlsafe_b64encode(digest).decode(), expected)
+    except (ValueError, TypeError):
+        return False
 
 
 def require_user(coach_session: str | None = Cookie(default=None)) -> str:
@@ -69,9 +102,24 @@ def require_user(coach_session: str | None = Cookie(default=None)) -> str:
         email = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)).decode()
     except (ValueError, UnicodeError):
         raise HTTPException(status_code=401, detail="Sessão inválida") from None
-    if email.lower() != ADMIN_EMAIL:
-        raise HTTPException(status_code=403, detail="Acesso negado")
-    return email
+    return email.lower()
+
+
+def require_active_user(email: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> UserRecord:
+    user = database.get(UserRecord, email)
+    if user is None or not user.active:
+        raise HTTPException(status_code=403, detail="Usuário inativo ou inexistente")
+    return user
+
+
+def require_admin(user: UserRecord = Depends(require_active_user)) -> UserRecord:
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Acesso administrativo necessário")
+    return user
+
+
+def require_active_email(user: UserRecord = Depends(require_active_user)) -> str:
+    return user.email
 
 
 class Session(BaseModel):
@@ -132,6 +180,9 @@ class ReviewState(BaseModel):
 def initialize_app_data() -> None:
     initialize_database()
     with SessionLocal() as database:
+        if ADMIN_PASSWORD and database.get(UserRecord, ADMIN_EMAIL) is None:
+            database.add(UserRecord(email=ADMIN_EMAIL, password_hash=hash_password(ADMIN_PASSWORD), role="admin", active=True))
+            database.commit()
         for directory in UPLOAD_DIR.glob("*") if UPLOAD_DIR.exists() else []:
             try: session_id = str(UUID(directory.name))
             except ValueError: continue
@@ -186,16 +237,15 @@ def health() -> dict[str, str]:
 
 
 @app.post("/v1/auth/login")
-def login(credentials: LoginRequest, response: Response) -> dict[str, str]:
-    valid_email = hmac.compare_digest(credentials.email.lower(), ADMIN_EMAIL)
-    valid_password = bool(ADMIN_PASSWORD) and hmac.compare_digest(credentials.password, ADMIN_PASSWORD)
-    if not (valid_email and valid_password and AUTH_SECRET):
+def login(credentials: LoginRequest, response: Response, database: DatabaseSession = Depends(get_database)) -> dict[str, str]:
+    user = database.get(UserRecord, credentials.email.lower().strip())
+    if not (user and user.active and AUTH_SECRET and verify_password(credentials.password, user.password_hash)):
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
     response.set_cookie(
-        "coach_session", _session_token(ADMIN_EMAIL), httponly=True,
+        "coach_session", _session_token(user.email), httponly=True,
         secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 12, path="/",
     )
-    return {"email": ADMIN_EMAIL}
+    return {"email": user.email, "role": user.role}
 
 
 @app.post("/v1/auth/logout", status_code=204)
@@ -204,12 +254,44 @@ def logout(response: Response) -> None:
 
 
 @app.get("/v1/auth/me")
-def me(email: str = Depends(require_user)) -> dict[str, str]:
-    return {"email": email}
+def me(user: UserRecord = Depends(require_active_user)) -> dict[str, str]:
+    return {"email": user.email, "role": user.role}
+
+
+@app.get("/v1/admin/users", response_model=list[UserView])
+def list_users(_admin: UserRecord = Depends(require_admin), database: DatabaseSession = Depends(get_database)) -> list[UserView]:
+    users = database.scalars(select(UserRecord).order_by(UserRecord.created_at.desc())).all()
+    return [UserView(email=item.email, role=item.role, active=item.active, created_at=item.created_at) for item in users]
+
+
+@app.post("/v1/admin/users", response_model=UserView, status_code=201)
+def create_user(payload: UserCreate, _admin: UserRecord = Depends(require_admin), database: DatabaseSession = Depends(get_database)) -> UserView:
+    email = payload.email.lower().strip()
+    if "@" not in email or database.get(UserRecord, email) is not None:
+        raise HTTPException(status_code=409, detail="E-mail inválido ou já cadastrado")
+    user = UserRecord(email=email, password_hash=hash_password(payload.password), role=payload.role, active=True)
+    database.add(user); database.commit()
+    return UserView(email=user.email, role=user.role, active=user.active, created_at=user.created_at)
+
+
+@app.post("/v1/admin/users/{email}/toggle", response_model=UserView)
+def toggle_user(email: str, admin: UserRecord = Depends(require_admin), database: DatabaseSession = Depends(get_database)) -> UserView:
+    user = database.get(UserRecord, email.lower())
+    if user is None: raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    if user.email == admin.email: raise HTTPException(status_code=409, detail="O administrador atual não pode desativar a própria conta")
+    user.active = not user.active; database.commit()
+    return UserView(email=user.email, role=user.role, active=user.active, created_at=user.created_at)
+
+
+@app.post("/v1/admin/users/{email}/password", status_code=204)
+def reset_user_password(email: str, payload: UserPasswordReset, _admin: UserRecord = Depends(require_admin), database: DatabaseSession = Depends(get_database)) -> None:
+    user = database.get(UserRecord, email.lower())
+    if user is None: raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    user.password_hash = hash_password(payload.password); database.commit()
 
 
 @app.post("/v1/sessions", response_model=Session, status_code=201)
-def create_session(tournament_name: str | None = None, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> Session:
+def create_session(tournament_name: str | None = None, user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> Session:
     session = Session(tournament_name=tournament_name)
     record = SessionRecord(id=str(session.id), owner_email=user, status=session.status, tournament_name=tournament_name)
     database.add(record); database.commit()
@@ -217,7 +299,7 @@ def create_session(tournament_name: str | None = None, user: str = Depends(requi
 
 
 @app.get("/v1/sessions", response_model=list[SessionSummary])
-def list_sessions(user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> list[SessionSummary]:
+def list_sessions(user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> list[SessionSummary]:
     records = database.scalars(select(SessionRecord).where(SessionRecord.owner_email == user).order_by(SessionRecord.created_at.desc()).limit(50)).all()
     result = []
     for record in records:
@@ -236,7 +318,7 @@ def list_sessions(user: str = Depends(require_user), database: DatabaseSession =
 
 
 @app.get("/v1/sessions/export")
-def export_sessions(user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> Response:
+def export_sessions(user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> Response:
     sessions = list_sessions(user, database)
     payload = {"platform": "PPPoker", "post_session_only": True, "exported_at": datetime.now(timezone.utc).isoformat(),
                "sessions": [item.model_dump(mode="json") for item in sessions]}
@@ -245,7 +327,7 @@ def export_sessions(user: str = Depends(require_user), database: DatabaseSession
 
 
 @app.get("/v1/sessions/{session_id}", response_model=Session)
-def get_session(session_id: UUID, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> Session:
+def get_session(session_id: UUID, user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> Session:
     record = database.get(SessionRecord, str(session_id))
     if record is None or record.owner_email != user:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
@@ -253,7 +335,7 @@ def get_session(session_id: UUID, user: str = Depends(require_user), database: D
 
 
 @app.post("/v1/sessions/{session_id}/metadata", response_model=Session)
-def update_session_metadata(session_id: UUID, update: SessionMetadataUpdate, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> Session:
+def update_session_metadata(session_id: UUID, update: SessionMetadataUpdate, user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> Session:
     record = ensure_session_owner(session_id, user, database)
     record.tournament_name = update.tournament_name.strip() if update.tournament_name else None
     database.commit()
@@ -261,7 +343,7 @@ def update_session_metadata(session_id: UUID, update: SessionMetadataUpdate, use
 
 
 @app.post("/v1/sessions/{session_id}/retry", status_code=202)
-async def retry_session(session_id: UUID, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> dict[str, str]:
+async def retry_session(session_id: UUID, user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> dict[str, str]:
     record = ensure_session_owner(session_id, user, database)
     source = next((UPLOAD_DIR / str(session_id)).glob("source.*"), None)
     if source is None:
@@ -277,7 +359,7 @@ async def retry_session(session_id: UUID, user: str = Depends(require_user), dat
 
 
 @app.get("/v1/sessions/{session_id}/processing", response_model=ProcessingStatus)
-def processing_status(session_id: UUID, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> ProcessingStatus:
+def processing_status(session_id: UUID, user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> ProcessingStatus:
     ensure_session_owner(session_id, user, database)
     directory = UPLOAD_DIR / str(session_id)
     if not directory.exists():
@@ -293,7 +375,7 @@ def processing_status(session_id: UUID, user: str = Depends(require_user), datab
 
 
 @app.get("/v1/sessions/{session_id}/review", response_model=ReviewState)
-def get_review(session_id: UUID, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> ReviewState:
+def get_review(session_id: UUID, user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> ReviewState:
     ensure_session_owner(session_id, user, database)
     path = review_path(session_id)
     if not path.exists():
@@ -305,7 +387,7 @@ def get_review(session_id: UUID, user: str = Depends(require_user), database: Da
 
 
 @app.post("/v1/sessions/{session_id}/review", response_model=ReviewState)
-def save_review(session_id: UUID, review: ReviewState, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> ReviewState:
+def save_review(session_id: UUID, review: ReviewState, user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> ReviewState:
     ensure_session_owner(session_id, user, database)
     review.updated_at = datetime.now(timezone.utc)
     path = review_path(session_id)
@@ -317,7 +399,7 @@ def save_review(session_id: UUID, review: ReviewState, user: str = Depends(requi
 
 
 @app.get("/v1/sessions/{session_id}/review/export")
-def export_review(session_id: UUID, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> Response:
+def export_review(session_id: UUID, user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> Response:
     review = get_review(session_id, user, database)
     manifest = read_manifest(session_id) or {}
     payload = {"session_id": str(session_id), "platform": "PPPoker", "post_session_only": True,
@@ -330,7 +412,7 @@ def export_review(session_id: UUID, user: str = Depends(require_user), database:
 
 
 @app.get("/v1/sessions/{session_id}/frames/{filename}")
-def session_frame(session_id: UUID, filename: str, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> FileResponse:
+def session_frame(session_id: UUID, filename: str, user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> FileResponse:
     ensure_session_owner(session_id, user, database)
     if not filename.startswith("frame-") or not filename.endswith(".jpg") or Path(filename).name != filename:
         raise HTTPException(status_code=400, detail="Nome de frame inválido")
@@ -341,7 +423,7 @@ def session_frame(session_id: UUID, filename: str, user: str = Depends(require_u
 
 
 @app.get("/v1/sessions/{session_id}/clips/{filename}")
-def session_clip(session_id: UUID, filename: str, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> FileResponse:
+def session_clip(session_id: UUID, filename: str, user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> FileResponse:
     ensure_session_owner(session_id, user, database)
     if not filename.startswith("hand-") or not filename.endswith(".mp4") or Path(filename).name != filename:
         raise HTTPException(status_code=400, detail="Nome de clipe inválido")
@@ -352,7 +434,7 @@ def session_clip(session_id: UUID, filename: str, user: str = Depends(require_us
 
 
 @app.get("/v1/sessions/{session_id}/evidence/{filename}")
-def session_evidence(session_id: UUID, filename: str, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> FileResponse:
+def session_evidence(session_id: UUID, filename: str, user: str = Depends(require_active_email), database: DatabaseSession = Depends(get_database)) -> FileResponse:
     ensure_session_owner(session_id, user, database)
     if not filename.startswith("rabbit-banner-") or not filename.endswith(".jpg") or Path(filename).name != filename:
         raise HTTPException(status_code=400, detail="Nome de evidência inválido")
@@ -366,7 +448,7 @@ def session_evidence(session_id: UUID, filename: str, user: str = Depends(requir
 async def upload_recording(
     video: UploadFile = File(...),
     tournament_name: str | None = Form(default=None),
-    user: str = Depends(require_user),
+    user: str = Depends(require_active_email),
     database: DatabaseSession = Depends(get_database),
 ) -> Session:
     suffix = Path(video.filename or "").suffix.lower()

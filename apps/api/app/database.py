@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, String, create_engine
+from sqlalchemy import Boolean, DateTime, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -18,6 +18,16 @@ class SessionRecord(Base):
     status: Mapped[str] = mapped_column(String(64), default="created", index=True)
     tournament_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class UserRecord(Base):
+    __tablename__ = "users"
+
+    email: Mapped[str] = mapped_column(String(320), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(String(512))
+    role: Mapped[str] = mapped_column(String(32), default="player", index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
 

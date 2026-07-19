@@ -1,6 +1,8 @@
-# Coach IA Pós-Sessão — v2.4.0
+# Coach IA Pós-Sessão — v3.0.0 Internal Beta
 
 SaaS de estudo técnico para gravações encerradas da PPPoker. O sistema não oferece assistência durante partidas e não deve ser utilizado como ferramenta em tempo real.
+
+Esta edição é destinada a testes internos. Não contém preços, planos comerciais, assinaturas, checkout, cobrança ou integração de pagamentos.
 
 ## Estado atual
 
@@ -25,6 +27,10 @@ SaaS de estudo técnico para gravações encerradas da PPPoker. O sistema não o
 - edição do nome do torneio e filtros por período;
 - detalhes técnicos do arquivo e reprocessamento controlado de falhas;
 - exportação consolidada das sessões.
+- autenticação multiusuário com papéis de administrador e jogador;
+- criação, ativação, desativação e redefinição de senha pelo painel interno;
+- isolamento das sessões por proprietário;
+- senhas armazenadas com PBKDF2-SHA256 e salt individual.
 
 ## Regras de segurança do produto
 
@@ -67,6 +73,19 @@ curl http://localhost:3000/api/health
 
 O arquivo `.env` deve permanecer somente na Abacus e nunca deve ser enviado ao GitHub.
 
+No primeiro boot, `ADMIN_EMAIL` e `ADMIN_PASSWORD` criam a conta administrativa inicial. Depois disso, novos acessos são criados em **Usuários** dentro do dashboard.
+
+## Testes internos e usuários
+
+1. Entre com o administrador configurado no `.env`.
+2. Abra **Usuários** no topo do dashboard.
+3. Informe e-mail, senha inicial e papel.
+4. Entregue as credenciais ao testador por um canal seguro.
+5. O jogador verá e administrará somente as próprias sessões.
+6. O administrador pode redefinir a senha ou desativar o acesso.
+
+O roteiro completo de validação está em `INTERNAL_TESTING.md`.
+
 ## Fluxo atual
 
 1. O jogador encerra a sessão.
@@ -79,6 +98,15 @@ O arquivo `.env` deve permanecer somente na Abacus e nunca deve ser enviado ao G
 8. As decisões e observações permanecem salvas após atualizar a página.
 
 ## Evolução recente
+
+### v3.0.0 Internal Beta
+
+- pacote único cumulativo para testes internos;
+- autenticação multiusuário persistida no PostgreSQL;
+- papéis de administrador e jogador;
+- painel de criação e manutenção de acessos;
+- isolamento de dados por usuário;
+- nenhuma funcionalidade de valores, planos ou pagamentos.
 
 ### v2.4.0
 
