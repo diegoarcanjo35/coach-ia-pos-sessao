@@ -21,6 +21,8 @@ O deploy usa apenas Git e Docker; não requer o Agent da Abacus.
 - acesso administrativo protegido por cookie HttpOnly;
 - upload autenticado e limitado por tamanho.
 - validação técnica assíncrona com `ffprobe` e manifesto por sessão.
+- segmentação temporal a cada 2 segundos com miniaturas de baixo custo;
+- política conservadora `unknown_until_evidenced` antes da classificação PPPoker.
 
 O pipeline de visão computacional ainda é um adaptador seguro: ele registra o trabalho,
 mas não inventa mãos ou decisões até que os detectores validados sejam integrados.
