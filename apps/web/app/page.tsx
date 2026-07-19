@@ -13,7 +13,7 @@ export default function Home() {
     setMessage("Enviando gravação com segurança…");
     const form = new FormData(event.currentTarget);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/v1/uploads`, { method: "POST", body: form });
+      const response = await fetch("/v1/uploads", { method: "POST", body: form });
       if (!response.ok) throw new Error("upload");
       const session = await response.json();
       setState("done");
