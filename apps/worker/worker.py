@@ -7,6 +7,7 @@ import time
 
 from redis import Redis
 from PIL import Image
+import numpy as np
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 redis = Redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
@@ -70,6 +71,27 @@ def extract_timeline(video_path: str, duration: float) -> list[dict[str, object]
     return timeline
 
 
+def classify_pppoker_frame(frame_path: Path, transition: bool) -> dict[str, object]:
+    with Image.open(frame_path) as source:
+        image = np.asarray(source.convert("RGB"))
+    height, width = image.shape[:2]
+    if height / max(width, 1) < 1.45:
+        return {"screen_type": "unknown", "confidence": 0.0, "evidence": {"layout": "not_vertical_pppoker"}}
+    panel = image[int(height * .07):int(height * .79), int(width * .18):int(width * .98)]
+    lum = float(panel.mean())
+    blue = float(((panel[:, :, 2] > panel[:, :, 0] * 1.08) & (panel[:, :, 2] > panel[:, :, 1] * 1.05)).mean())
+    hero = image[int(height * .79):int(height * .90), int(width * .34):int(width * .75)]
+    white = float(((hero[:, :, 0] > 165) & (hero[:, :, 1] > 165) & (hero[:, :, 2] > 165)).mean())
+    evidence = {"layout": "pppoker_vertical_v220", "panel_luminance": round(lum, 2), "panel_blue_ratio": round(blue, 4), "hero_white_ratio": round(white, 4)}
+    if lum < 58 and blue > .82:
+        return {"screen_type": "lobby", "confidence": round(min(.98, .75 + (blue - .82) * 2), 3), "evidence": evidence}
+    if blue >= .75 and 70 <= lum <= 140:
+        return {"screen_type": "table", "confidence": round(min(.96, .76 + (blue - .75)), 3), "evidence": evidence}
+    if transition:
+        return {"screen_type": "transition", "confidence": .65, "evidence": evidence}
+    return {"screen_type": "unknown", "confidence": 0.0, "evidence": evidence}
+
+
 def main() -> None:
     logging.info("Worker pós-sessão iniciado; aguardando jobs.")
     while True:
@@ -86,10 +108,16 @@ def main() -> None:
             metadata = probe_video(video_path)
             write_manifest(video_path, "segmenting", session_id=job.get("id"), metadata=metadata)
             timeline = extract_timeline(video_path, float(metadata["duration_seconds"]))
-            write_manifest(video_path, "ready_for_screen_classification", session_id=job.get("id"), metadata=metadata, timeline=timeline,
+            frames_dir = Path(video_path).parent / "frames"
+            for item in timeline:
+                result = classify_pppoker_frame(frames_dir / str(item["file"]), item["screen_type"] == "transition")
+                item.update(result)
+            counts = {name: sum(item["screen_type"] == name for item in timeline) for name in ("table", "lobby", "transition", "unknown")}
+            write_manifest(video_path, "ready_for_review", session_id=job.get("id"), metadata=metadata, timeline=timeline,
                            segmentation={"interval_seconds": 2, "frame_count": len(timeline),
                                          "segment_count": max((int(item["segment_id"]) for item in timeline), default=0),
-                                         "transition_threshold": 0.18, "policy": "unknown_until_evidenced"})
+                                         "transition_threshold": 0.18, "policy": "unknown_until_evidenced"},
+                           classification={"engine": "pppoker_vertical_v220", "counts": counts, "low_confidence_requires_review": True})
             logging.info("Vídeo segmentado: %s (%s frames)", job.get("id"), len(timeline))
         except Exception as exc:
             write_manifest(video_path, "failed", session_id=job.get("id"), error=str(exc))

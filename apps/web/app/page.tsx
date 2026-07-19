@@ -16,7 +16,7 @@ export default function Home() {
       if (response.ok) {
         const data = await response.json();
         setProcessing(data);
-        if (["ready_for_screen_classification", "failed"].includes(data.status)) return;
+        if (["ready_for_review", "failed"].includes(data.status)) return;
       }
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
@@ -31,11 +31,14 @@ export default function Home() {
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setState("sending"); setProcessing(null); setMessage("Enviando gravação com segurança…");
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    setState("sending"); setProcessing(null); setMessage("Enviando gravação com segurança…");
     try {
       const response = await fetch("/v1/uploads", { method: "POST", body: new FormData(event.currentTarget) });
       if (!response.ok) throw new Error("upload");
       const session = await response.json();
+      formElement.reset();
       setState("done"); setMessage(`Sessão ${String(session.id).slice(0, 8)} recebida. Acompanhe a validação abaixo.`);
       void followProcessing(String(session.id));
     } catch { setState("error"); setMessage("Não foi possível enviar. Confirme se a API está ativa e tente novamente."); }

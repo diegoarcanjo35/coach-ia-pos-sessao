@@ -25,6 +25,7 @@ O deploy usa apenas Git e Docker; não requer o Agent da Abacus.
 - política conservadora `unknown_until_evidenced` antes da classificação PPPoker.
 - pontuação de mudança visual e agrupamento de segmentos por histograma.
 - miniaturas autenticadas e acompanhamento do processamento no dashboard.
+- classificador calibrado para o layout vertical PPPoker v220 com evidências por frame.
 
 O pipeline de visão computacional ainda é um adaptador seguro: ele registra o trabalho,
 mas não inventa mãos ou decisões até que os detectores validados sejam integrados.
