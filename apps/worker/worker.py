@@ -147,13 +147,40 @@ def detect_hand_boundaries(video_path: str, width: int, height: int, duration: f
         next_time = float(starts[hand_index]["time"]) if hand_index < len(starts) else duration
         end_time = max(start_time + 1, min(duration, next_time - .5 if hand_index < len(starts) else duration))
         lobby_overlap = any(start_time <= time <= end_time for time in lobby_times)
+        is_last = hand_index == len(starts)
+        last_cards = max((float(item["time"]) for item in samples if start_time <= float(item["time"]) <= end_time and item["cards"]), default=start_time)
+        partial_end = is_last and duration - last_cards < 2.0
+        partial_start = bool(start["partial"])
+        reasons = []
+        if partial_start: reasons.append("recording_started_during_hand")
+        if partial_end: reasons.append("recording_ended_during_deal_or_hand")
+        if lobby_overlap: reasons.append("lobby_during_hand")
         hands.append({"index": hand_index, "start_seconds": round(start_time, 3), "end_seconds": round(end_time, 3),
+                      "duration_seconds": round(end_time - start_time, 3),
                       "confidence": round(float(start["confidence"]) - (.08 if lobby_overlap else 0), 3),
-                      "partial": bool(start["partial"]), "lobby_during_hand": lobby_overlap,
-                      "status": "review" if start["partial"] or lobby_overlap else "detected"})
+                      "partial": partial_start or partial_end, "partial_start": partial_start, "partial_end": partial_end,
+                      "lobby_during_hand": lobby_overlap, "reasons": reasons,
+                      "status": "quarantine" if partial_start or partial_end else ("review" if lobby_overlap else "detected")})
+    complete = [item for item in hands if not item["partial"]]
     return {"sample_fps": fps, "sample_count": len(samples), "hands": hands, "events": events,
-            "summary": {"hands_detected": len(hands), "partial": sum(bool(item["partial"]) for item in hands),
+            "summary": {"candidates": len(hands), "complete_hands": len(complete), "partial": len(hands) - len(complete),
                         "with_lobby": sum(bool(item["lobby_during_hand"]) for item in hands)}}
+
+
+def create_hand_clips(video_path: str, hands: list[dict[str, object]], duration: float) -> list[dict[str, object]]:
+    output_dir = Path(video_path).parent / "clips"
+    output_dir.mkdir(exist_ok=True)
+    clips = []
+    for hand in hands:
+        start = max(0.0, float(hand["start_seconds"]) - 3.0)
+        end = min(duration, float(hand["end_seconds"]))
+        output = output_dir / f"hand-{int(hand['index']):03d}.mp4"
+        subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", str(start), "-i", video_path,
+                        "-t", str(max(.5, end - start)), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "24",
+                        "-movflags", "+faststart", str(output)], check=True, capture_output=True, text=True, timeout=max(180, int((end-start)*3)))
+        clips.append({"hand_index": hand["index"], "file": output.name, "start_seconds": round(start, 3), "end_seconds": round(end, 3),
+                      "partial": hand["partial"], "publishable": not hand["partial"]})
+    return clips
 
 
 def main() -> None:
@@ -178,12 +205,13 @@ def main() -> None:
                 item.update(result)
             counts = {name: sum(item["screen_type"] == name for item in timeline) for name in ("table", "lobby", "transition", "unknown")}
             hand_detection = detect_hand_boundaries(video_path, int(metadata["video"]["width"]), int(metadata["video"]["height"]), float(metadata["duration_seconds"])) if counts["table"] else None
-            write_manifest(video_path, "hands_detected", session_id=job.get("id"), metadata=metadata, timeline=timeline,
+            clips = create_hand_clips(video_path, hand_detection["hands"], float(metadata["duration_seconds"])) if hand_detection else []
+            write_manifest(video_path, "clips_ready_for_review", session_id=job.get("id"), metadata=metadata, timeline=timeline,
                            segmentation={"interval_seconds": 2, "frame_count": len(timeline),
                                          "segment_count": max((int(item["segment_id"]) for item in timeline), default=0),
                                          "transition_threshold": 0.18, "policy": "unknown_until_evidenced"},
                            classification={"engine": "pppoker_vertical_v220", "counts": counts, "low_confidence_requires_review": True},
-                           hand_detection=hand_detection)
+                           hand_detection=hand_detection, clips=clips)
             logging.info("Vídeo segmentado: %s (%s frames)", job.get("id"), len(timeline))
         except Exception as exc:
             write_manifest(video_path, "failed", session_id=job.get("id"), error=str(exc))

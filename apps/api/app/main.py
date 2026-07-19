@@ -145,6 +145,16 @@ def session_frame(session_id: UUID, filename: str, _user: str = Depends(require_
     return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
 
 
+@app.get("/v1/sessions/{session_id}/clips/{filename}")
+def session_clip(session_id: UUID, filename: str, _user: str = Depends(require_user)) -> FileResponse:
+    if not filename.startswith("hand-") or not filename.endswith(".mp4") or Path(filename).name != filename:
+        raise HTTPException(status_code=400, detail="Nome de clipe inválido")
+    path = UPLOAD_DIR / str(session_id) / "clips" / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Clipe não encontrado")
+    return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "private, max-age=300"})
+
+
 @app.post("/v1/uploads", response_model=Session, status_code=202)
 async def upload_recording(
     video: UploadFile = File(...),

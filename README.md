@@ -27,6 +27,7 @@ O deploy usa apenas Git e Docker; não requer o Agent da Abacus.
 - miniaturas autenticadas e acompanhamento do processamento no dashboard.
 - classificador calibrado para o layout vertical PPPoker v220 com evidências por frame.
 - detector pós-sessão de início/fim de mãos a 2 FPS, preservando interrupções de Lobby.
+- clipes individuais com pré-roll de 3 segundos e quarentena de candidatos incompletos.
 
 O pipeline de visão computacional ainda é um adaptador seguro: ele registra o trabalho,
 mas não inventa mãos ou decisões até que os detectores validados sejam integrados.
