@@ -6,6 +6,7 @@ import subprocess
 import time
 
 from redis import Redis
+from PIL import Image
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 redis = Redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
@@ -48,11 +49,25 @@ def extract_timeline(video_path: str, duration: float) -> list[dict[str, object]
         check=True, capture_output=True, text=True, timeout=max(180, int(duration * 2)),
     )
     frames = sorted(frames_dir.glob("frame-*.jpg"))
-    return [
-        {"index": index, "timestamp_seconds": round((index - 1) * 2.0, 3),
-         "file": frame.name, "screen_type": "unknown", "confidence": 0.0}
-        for index, frame in enumerate(frames, start=1)
-    ]
+    timeline: list[dict[str, object]] = []
+    previous_histogram: list[float] | None = None
+    segment_id = 1
+    for index, frame in enumerate(frames, start=1):
+        with Image.open(frame) as image:
+            histogram = image.convert("L").resize((64, 64)).histogram()
+        total = float(sum(histogram)) or 1.0
+        normalized = [value / total for value in histogram]
+        change_score = 0.0 if previous_histogram is None else sum(abs(a - b) for a, b in zip(normalized, previous_histogram)) / 2
+        is_transition = previous_histogram is not None and change_score >= 0.18
+        if is_transition:
+            segment_id += 1
+        timeline.append({
+            "index": index, "timestamp_seconds": round((index - 1) * 2.0, 3), "file": frame.name,
+            "screen_type": "transition" if is_transition else "unknown", "confidence": round(change_score, 4),
+            "change_score": round(change_score, 4), "segment_id": segment_id,
+        })
+        previous_histogram = normalized
+    return timeline
 
 
 def main() -> None:
@@ -72,7 +87,9 @@ def main() -> None:
             write_manifest(video_path, "segmenting", session_id=job.get("id"), metadata=metadata)
             timeline = extract_timeline(video_path, float(metadata["duration_seconds"]))
             write_manifest(video_path, "ready_for_screen_classification", session_id=job.get("id"), metadata=metadata, timeline=timeline,
-                           segmentation={"interval_seconds": 2, "frame_count": len(timeline), "policy": "unknown_until_evidenced"})
+                           segmentation={"interval_seconds": 2, "frame_count": len(timeline),
+                                         "segment_count": max((int(item["segment_id"]) for item in timeline), default=0),
+                                         "transition_threshold": 0.18, "policy": "unknown_until_evidenced"})
             logging.info("Vídeo segmentado: %s (%s frames)", job.get("id"), len(timeline))
         except Exception as exc:
             write_manifest(video_path, "failed", session_id=job.get("id"), error=str(exc))
