@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 
@@ -132,6 +133,16 @@ def processing_status(session_id: UUID, _user: str = Depends(require_user)) -> P
     except (OSError, json.JSONDecodeError):
         raise HTTPException(status_code=503, detail="Manifesto temporariamente indisponível") from None
     return ProcessingStatus(session_id=session_id, status=str(manifest.get("status", "unknown")), manifest=manifest)
+
+
+@app.get("/v1/sessions/{session_id}/frames/{filename}")
+def session_frame(session_id: UUID, filename: str, _user: str = Depends(require_user)) -> FileResponse:
+    if not filename.startswith("frame-") or not filename.endswith(".jpg") or Path(filename).name != filename:
+        raise HTTPException(status_code=400, detail="Nome de frame inválido")
+    path = UPLOAD_DIR / str(session_id) / "frames" / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Frame não encontrado")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
 
 
 @app.post("/v1/uploads", response_model=Session, status_code=202)
