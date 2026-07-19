@@ -16,7 +16,7 @@ export default function Home() {
       if (response.ok) {
         const data = await response.json();
         setProcessing(data);
-        if (["ready_for_review", "failed"].includes(data.status)) return;
+        if (["hands_detected", "failed"].includes(data.status)) return;
       }
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
@@ -61,6 +61,7 @@ export default function Home() {
         <button disabled={state === "sending"}>{state === "sending" ? "Enviando…" : "Enviar sessão"}</button><p className={`status ${state}`}>{message}</p>
         {processing && <div className="processing"><strong>Estado: {processing.status}</strong>
           {metadata && <span>{metadata.duration_seconds}s · {metadata.video.width}×{metadata.video.height} · {metadata.video.codec}</span>}
+          {processing.manifest?.hand_detection?.summary && <span>{processing.manifest.hand_detection.summary.hands_detected} mãos detectadas · {processing.manifest.hand_detection.summary.with_lobby} com Lobby · {processing.manifest.hand_detection.summary.partial} parcial</span>}
           <div className="timeline">{timeline.slice(0, 12).map((frame: any) => <figure key={frame.file}>
             <img src={`/v1/sessions/${processing.session_id}/frames/${frame.file}`} alt={`Frame em ${frame.timestamp_seconds}s`} />
             <figcaption>{frame.timestamp_seconds}s · S{frame.segment_id}</figcaption>
