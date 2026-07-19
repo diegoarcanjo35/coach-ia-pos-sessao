@@ -48,3 +48,15 @@ def test_review_is_persisted_and_exported() -> None:
         exported = client.get(f"/v1/sessions/{session_id}/review/export")
         assert exported.status_code == 200
         assert exported.json()["post_session_only"] is True
+
+
+def test_session_metadata_and_consolidated_export() -> None:
+    with TestClient(app) as client:
+        client.post("/v1/auth/login", json={"email": "admin@test.local", "password": "test-password"})
+        session_id = client.post("/v1/sessions?tournament_name=Antes").json()["id"]
+        updated = client.post(f"/v1/sessions/{session_id}/metadata", json={"tournament_name": "Depois"})
+        assert updated.status_code == 200
+        assert updated.json()["tournament_name"] == "Depois"
+        exported = client.get("/v1/sessions/export")
+        assert exported.status_code == 200
+        assert any(item["id"] == session_id for item in exported.json()["sessions"])

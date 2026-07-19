@@ -25,7 +25,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Coach IA API", version="2.3.0", lifespan=lifespan)
+app = FastAPI(title="Coach IA API", version="2.4.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -46,6 +46,10 @@ COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class SessionMetadataUpdate(BaseModel):
+    tournament_name: str | None = Field(default=None, max_length=255)
 
 
 def _session_token(email: str) -> str:
@@ -89,6 +93,13 @@ class SessionSummary(Session):
     processing_status: str
     complete_hands: int = 0
     partial_hands: int = 0
+    duration_seconds: float = 0
+    size_bytes: int = 0
+    frame_count: int = 0
+    review_finalized: bool = False
+    favorite: bool = False
+    archived: bool = False
+    session_tags: list[str] = Field(default_factory=list)
 
 
 class HandReviewDetail(BaseModel):
@@ -112,6 +123,9 @@ class ReviewState(BaseModel):
     hand_details: dict[str, HandReviewDetail] = Field(default_factory=dict)
     lobby_values: dict[str, LobbyReviewValue] = Field(default_factory=dict)
     finalized: bool = False
+    favorite: bool = False
+    archived: bool = False
+    session_tags: list[str] = Field(default_factory=list, max_length=12)
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -156,6 +170,16 @@ def review_path(session_id: UUID) -> Path:
     return UPLOAD_DIR / str(session_id) / "review.json"
 
 
+def read_review_file(session_id: UUID) -> ReviewState:
+    path = review_path(session_id)
+    if not path.exists():
+        return ReviewState()
+    try:
+        return ReviewState.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ReviewState()
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "coach-ia-api", "version": app.version}
@@ -198,11 +222,26 @@ def list_sessions(user: str = Depends(require_user), database: DatabaseSession =
     result = []
     for record in records:
         manifest = read_manifest(UUID(record.id))
+        review = read_review_file(UUID(record.id))
         processing = str(manifest.get("status", record.status)) if manifest else record.status
         summary = manifest.get("hand_detection", {}).get("summary", {}) if manifest else {}
+        metadata = manifest.get("metadata", {}) if manifest else {}
+        segmentation = manifest.get("segmentation", {}) if manifest else {}
         result.append(SessionSummary(**to_session(record).model_dump(), processing_status=processing,
-                                     complete_hands=int(summary.get("complete_hands", 0)), partial_hands=int(summary.get("partial", 0))))
+                                     complete_hands=int(summary.get("complete_hands", 0)), partial_hands=int(summary.get("partial", 0)),
+                                     duration_seconds=float(metadata.get("duration_seconds", 0)), size_bytes=int(metadata.get("size_bytes", 0)),
+                                     frame_count=int(segmentation.get("frame_count", 0)), review_finalized=review.finalized,
+                                     favorite=review.favorite, archived=review.archived, session_tags=review.session_tags))
     return result
+
+
+@app.get("/v1/sessions/export")
+def export_sessions(user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> Response:
+    sessions = list_sessions(user, database)
+    payload = {"platform": "PPPoker", "post_session_only": True, "exported_at": datetime.now(timezone.utc).isoformat(),
+               "sessions": [item.model_dump(mode="json") for item in sessions]}
+    return Response(content=json.dumps(payload, ensure_ascii=False, indent=2), media_type="application/json",
+                    headers={"Content-Disposition": 'attachment; filename="coach-ia-sessions.json"'})
 
 
 @app.get("/v1/sessions/{session_id}", response_model=Session)
@@ -211,6 +250,30 @@ def get_session(session_id: UUID, user: str = Depends(require_user), database: D
     if record is None or record.owner_email != user:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
     return to_session(record)
+
+
+@app.post("/v1/sessions/{session_id}/metadata", response_model=Session)
+def update_session_metadata(session_id: UUID, update: SessionMetadataUpdate, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> Session:
+    record = ensure_session_owner(session_id, user, database)
+    record.tournament_name = update.tournament_name.strip() if update.tournament_name else None
+    database.commit()
+    return to_session(record)
+
+
+@app.post("/v1/sessions/{session_id}/retry", status_code=202)
+async def retry_session(session_id: UUID, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> dict[str, str]:
+    record = ensure_session_owner(session_id, user, database)
+    source = next((UPLOAD_DIR / str(session_id)).glob("source.*"), None)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Vídeo original não encontrado")
+    manifest = read_manifest(session_id) or {}
+    if str(manifest.get("status", record.status)) != "failed":
+        raise HTTPException(status_code=409, detail="Somente sessões com falha podem ser reprocessadas")
+    queue = Redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
+    await queue.rpush("coach-ia:jobs", json.dumps({"id": str(session_id), "video_path": str(source)}))
+    await queue.aclose()
+    record.status = "queued"; database.commit()
+    return {"status": "queued", "session_id": str(session_id)}
 
 
 @app.get("/v1/sessions/{session_id}/processing", response_model=ProcessingStatus)

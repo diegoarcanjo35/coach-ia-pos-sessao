@@ -1,4 +1,4 @@
-# Coach IA Pós-Sessão — v2.3.0
+# Coach IA Pós-Sessão — v2.4.0
 
 SaaS de estudo técnico para gravações encerradas da PPPoker. O sistema não oferece assistência durante partidas e não deve ser utilizado como ferramenta em tempo real.
 
@@ -20,6 +20,11 @@ SaaS de estudo técnico para gravações encerradas da PPPoker. O sistema não o
 - tags, dificuldade e observações individuais por mão;
 - correção manual do contexto do Lobby;
 - exportação do relatório de revisão em JSON.
+- KPIs consolidados de volume e revisão;
+- favoritos, arquivamento e tags por sessão;
+- edição do nome do torneio e filtros por período;
+- detalhes técnicos do arquivo e reprocessamento controlado de falhas;
+- exportação consolidada das sessões.
 
 ## Regras de segurança do produto
 
@@ -74,6 +79,15 @@ O arquivo `.env` deve permanecer somente na Abacus e nunca deve ser enviado ao G
 8. As decisões e observações permanecem salvas após atualizar a página.
 
 ## Evolução recente
+
+### v2.4.0
+
+- lote de 15 melhorias para gestão operacional das sessões;
+- KPIs de horas, mãos, quarentena e revisões finalizadas;
+- favoritos, arquivamento, tags, ordenação e filtro por período;
+- edição do torneio e detalhamento do arquivo processado;
+- mensagens de falha e reprocessamento somente para sessões com erro;
+- exportação consolidada autenticada das sessões.
 
 ### v2.3.0
 
