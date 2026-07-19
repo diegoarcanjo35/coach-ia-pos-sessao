@@ -1,0 +1,8 @@
+{
+  "name": "coach-ia-web",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {"dev": "next dev", "build": "next build --webpack", "start": "next start"},
+  "dependencies": {"next": "16.2.10", "react": "19.2.7", "react-dom": "19.2.7"},
+  "devDependencies": {"@types/node": "24.2.1", "@types/react": "19.1.10", "typescript": "5.9.2"}
+}

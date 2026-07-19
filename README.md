@@ -10,3 +10,13 @@ Plataforma pós-sessão para upload e análise de gravações da PPPoker. Não o
 4. Verifique `http://localhost:3000/api/health` e `http://localhost:8000/health`.
 
 O deploy usa apenas Git e Docker; não requer o Agent da Abacus.
+
+## Escopo desta versão
+
+- upload manual de uma gravação encerrada;
+- criação e consulta de sessões;
+- fila assíncrona preparada para FFmpeg/OCR;
+- dashboard inicial sem qualquer assistência durante partidas.
+
+O pipeline de visão computacional ainda é um adaptador seguro: ele registra o trabalho,
+mas não inventa mãos ou decisões até que os detectores validados sejam integrados.

@@ -34,6 +34,13 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
     ports: ["8000:8000"]
+    volumes:
+      - upload-data:/data/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   worker:
     build: ./apps/worker
@@ -42,14 +49,18 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+    volumes:
+      - upload-data:/data/uploads
 
   web:
     build: ./apps/web
     restart: unless-stopped
     env_file: .env
-    depends_on: [api]
+    depends_on:
+      api: { condition: service_healthy }
     ports: ["3000:3000"]
 
 volumes:
   postgres-data:
   redis-data:
+  upload-data:
