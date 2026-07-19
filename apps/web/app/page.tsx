@@ -1,100 +1,39 @@
 "use client";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type UploadState = "idle" | "sending" | "done" | "error";
-type Processing = { session_id: string; status: string; manifest?: any };
+type Manifest = Record<string, any>;
+type Processing = { session_id: string; status: string; manifest?: Manifest };
 type SessionSummary = { id: string; tournament_name?: string; original_filename?: string; created_at: string; processing_status: string; complete_hands: number; partial_hands: number };
+const steps = ["probing","segmenting","classifying","detecting_hands","creating_clips","reading_context","clips_ready_for_review"];
+const labels: Record<string,string> = {probing:"Validando vídeo",segmenting:"Criando linha do tempo",classifying:"Classificando telas",detecting_hands:"Detectando mãos",creating_clips:"Gerando clipes",reading_context:"Lendo Lobby e Coelho",clips_ready_for_review:"Pronto para revisão",failed:"Falha"};
 
 export default function Home() {
-  const [state, setState] = useState<UploadState>("idle");
-  const [message, setMessage] = useState("Selecione uma gravação encerrada da PPPoker.");
-  const [authenticated, setAuthenticated] = useState(false);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [processing, setProcessing] = useState<Processing | null>(null);
-  const [history, setHistory] = useState<SessionSummary[]>([]);
-
-  async function loadHistory() {
-    const response = await fetch("/v1/sessions", { cache: "no-store" });
-    if (response.ok) setHistory(await response.json());
-  }
-
-  useEffect(() => {
-    void (async () => {
-      const response = await fetch("/v1/auth/me", { cache: "no-store" });
-      if (response.ok) { setAuthenticated(true); await loadHistory(); }
-      setAuthChecked(true);
-    })();
-  }, []);
-
-  async function followProcessing(sessionId: string) {
-    for (let attempt = 0; attempt < 30; attempt++) {
-      const response = await fetch(`/v1/sessions/${sessionId}/processing`, { cache: "no-store" });
-      if (response.ok) {
-        const data = await response.json();
-        setProcessing(data);
-        if (["clips_ready_for_review", "failed"].includes(data.status)) { await loadHistory(); return; }
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-  }
-
-  async function login(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    const response = await fetch("/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: data.get("email"), password: data.get("password") }) });
-    if (response.ok) { setAuthenticated(true); setMessage("Acesso seguro liberado. Selecione uma gravação encerrada."); await loadHistory(); }
-    else setMessage("E-mail ou senha inválidos.");
-  }
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const formElement = event.currentTarget;
-    setState("sending"); setProcessing(null); setMessage("Enviando gravação com segurança…");
-    try {
-      const response = await fetch("/v1/uploads", { method: "POST", body: new FormData(event.currentTarget) });
-      if (!response.ok) throw new Error("upload");
-      const session = await response.json();
-      formElement.reset();
-      setState("done"); setMessage(`Sessão ${String(session.id).slice(0, 8)} recebida. Acompanhe a validação abaixo.`);
-      void followProcessing(String(session.id));
-      await loadHistory();
-    } catch { setState("error"); setMessage("Não foi possível enviar. Confirme se a API está ativa e tente novamente."); }
-  }
-
-  const timeline = processing?.manifest?.timeline ?? [];
-  const metadata = processing?.manifest?.metadata;
-  if (!authChecked) return <main><p className="loading">Verificando sessão segura…</p></main>;
-  return <main>
-    <nav><span className="mark">C</span><strong>Coach IA</strong><span className="badge">PÓS-SESSÃO</span>{authenticated && <button className="logout" onClick={async()=>{await fetch("/v1/auth/logout",{method:"POST"});setAuthenticated(false);setHistory([]);setProcessing(null)}}>Sair</button>}</nav>
-    <section className="hero">
-      <p className="eyebrow">PPPOKER · ESTUDO TÉCNICO</p><h1>Sua sessão termina.<br/><span>Seu estudo começa.</span></h1>
-      <p className="lead">Envie a gravação depois de jogar. A plataforma prepara a revisão — nunca durante a partida.</p>
-      {!authenticated ? <form key="login" onSubmit={login}>
-        <label>E-mail administrativo<input name="email" type="email" autoComplete="username" required /></label>
-        <label>Senha<input name="password" type="password" autoComplete="current-password" required /></label>
-        <button>Entrar com segurança</button><p className="status">{message}</p>
-      </form> : <form key="upload" onSubmit={submit}>
-        <label>Gravação da sessão<input name="video" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm" required /></label>
-        <label>Nome do torneio (opcional)<input name="tournament_name" autoComplete="off" data-lpignore="true" data-1p-ignore placeholder="Ex.: 20K Garantido" /></label>
-        <button disabled={state === "sending"}>{state === "sending" ? "Enviando…" : "Enviar sessão"}</button><p className={`status ${state}`}>{message}</p>
-        {processing && <div className="processing"><strong>Estado: {processing.status}</strong>
-          {metadata && <span>{metadata.duration_seconds}s · {metadata.video.width}×{metadata.video.height} · {metadata.video.codec}</span>}
-          {processing.manifest?.hand_detection?.summary && <span>{processing.manifest.hand_detection.summary.complete_hands} mãos completas · {processing.manifest.hand_detection.summary.partial} candidato incompleto · {processing.manifest.hand_detection.summary.with_lobby} com Lobby</span>}
-          {processing.manifest?.lobby_context && <span>{processing.manifest.lobby_context.length} evento(s) de Lobby · {(processing.manifest.rabbit_detection?.candidates ?? []).length} evidências de Coelho aguardando OCR</span>}
-          <div className="timeline">{timeline.slice(0, 12).map((frame: any) => <figure key={frame.file}>
-            <img src={`/v1/sessions/${processing.session_id}/frames/${frame.file}`} alt={`Frame em ${frame.timestamp_seconds}s`} />
-            <figcaption>{frame.timestamp_seconds}s · S{frame.segment_id}</figcaption>
-          </figure>)}</div>
-          <div className="clips">{(processing.manifest?.clips ?? []).map((clip: any) => <article key={clip.file}>
-            <video controls preload="metadata" src={`/v1/sessions/${processing.session_id}/clips/${clip.file}`} />
-            <span>Mão {clip.hand_index} · {clip.partial ? "INCOMPLETA — REVISAR" : "completa"}</span>
-          </article>)}</div>
-        </div>}
-      </form>}
-    </section>
-    {authenticated && <section className="history"><h2>Sessões recentes</h2><div className="history-grid">{history.map(item=><button key={item.id} onClick={()=>void followProcessing(item.id)}>
-      <strong>{item.tournament_name || "Sessão PPPoker"}</strong><span>{new Date(item.created_at).toLocaleString("pt-BR")}</span><span>{item.processing_status}</span><small>{item.complete_hands} completas · {item.partial_hands} incompletas</small>
-    </button>)}</div></section>}
-    <section className="features"><article><b>01</b><h2>Upload manual</h2><p>Você controla quando a análise começa.</p></article><article><b>02</b><h2>Processamento assíncrono</h2><p>Nenhuma orientação durante o jogo.</p></article><article><b>03</b><h2>Evidência primeiro</h2><p>A IA não inventa ações não comprovadas.</p></article></section>
-  </main>;
+  const [state,setState]=useState<UploadState>("idle"); const [message,setMessage]=useState("Selecione uma gravação encerrada da PPPoker.");
+  const [authenticated,setAuthenticated]=useState(false); const [authChecked,setAuthChecked]=useState(false);
+  const [processing,setProcessing]=useState<Processing|null>(null); const [history,setHistory]=useState<SessionSummary[]>([]);
+  const [filter,setFilter]=useState("all");
+  async function loadHistory(){const r=await fetch("/v1/sessions",{cache:"no-store"});if(r.ok)setHistory(await r.json())}
+  useEffect(()=>{void(async()=>{const r=await fetch("/v1/auth/me",{cache:"no-store"});if(r.ok){setAuthenticated(true);await loadHistory()}setAuthChecked(true)})()},[]);
+  async function followProcessing(id:string){for(let i=0;i<180;i++){const r=await fetch(`/v1/sessions/${id}/processing`,{cache:"no-store"});if(r.ok){const d=await r.json();setProcessing(d);if(["clips_ready_for_review","failed"].includes(d.status)){await loadHistory();return}}await new Promise(x=>setTimeout(x,1000))}}
+  async function login(e:FormEvent<HTMLFormElement>){e.preventDefault();const d=new FormData(e.currentTarget);const r=await fetch("/v1/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:d.get("email"),password:d.get("password")})});if(r.ok){setAuthenticated(true);setMessage("Acesso seguro liberado.");await loadHistory()}else setMessage("E-mail ou senha inválidos.")}
+  async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();const form=e.currentTarget;setState("sending");setProcessing(null);setMessage("Enviando gravação com segurança…");try{const r=await fetch("/v1/uploads",{method:"POST",body:new FormData(form)});if(!r.ok)throw new Error();const s=await r.json();form.reset();setState("done");setMessage(`Sessão ${String(s.id).slice(0,8)} recebida.`);void followProcessing(String(s.id));await loadHistory()}catch{setState("error");setMessage("Não foi possível enviar. Tente novamente.")}}
+  const manifest=processing?.manifest??{}; const timeline=manifest.timeline??[]; const clips=manifest.clips??[]; const rabbits=manifest.rabbit_detection?.candidates??[];
+  const filtered=useMemo(()=>filter==="all"?timeline:timeline.filter((x:any)=>x.screen_type===filter),[timeline,filter]);
+  const current=Math.max(0,steps.indexOf(processing?.status??""));
+  if(!authChecked)return <main><p className="loading">Verificando sessão segura…</p></main>;
+  return <main><nav><span className="mark">C</span><strong>Coach IA</strong><span className="badge">PÓS-SESSÃO</span>{authenticated&&<button className="logout" onClick={async()=>{await fetch("/v1/auth/logout",{method:"POST"});setAuthenticated(false);setHistory([]);setProcessing(null)}}>Sair</button>}</nav>
+    {!authenticated?<section className="login-shell"><div><p className="eyebrow">PPPOKER · ESTUDO TÉCNICO</p><h1>Sua sessão termina.<br/><span>Seu estudo começa.</span></h1><p className="lead">Análise somente depois do jogo, com evidência antes de qualquer conclusão.</p></div><form key="login" onSubmit={login}><label>E-mail administrativo<input name="email" type="email" autoComplete="username" required/></label><label>Senha<input name="password" type="password" autoComplete="current-password" required/></label><button>Entrar com segurança</button><p className="status">{message}</p></form></section>:
+    <><header className="dash-head"><div><p className="eyebrow">CENTRAL DE REVISÃO</p><h1>Dashboard de sessões</h1><p>Envie, acompanhe e revise cada evidência em um único espaço.</p></div><div className="metric"><strong>{history.length}</strong><span>sessões recentes</span></div></header>
+    <section className="workspace"><aside><form key="upload" className="upload-card" onSubmit={submit}><h2>Nova sessão</h2><label>Gravação encerrada<input name="video" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm" required/></label><label>Nome do torneio (opcional)<input name="tournament_name" autoComplete="off" data-lpignore="true" data-1p-ignore placeholder="Ex.: 20K Garantido"/></label><button disabled={state==="sending"}>{state==="sending"?"Enviando…":"Enviar sessão"}</button><p className={`status ${state}`}>{message}</p></form>
+      <div className="sessions"><h2>Sessões</h2>{history.map(x=><button className={processing?.session_id===x.id?"active":""} key={x.id} onClick={()=>void followProcessing(x.id)}><strong>{x.tournament_name||"Sessão PPPoker"}</strong><span>{new Date(x.created_at).toLocaleString("pt-BR")}</span><small>{x.complete_hands} completas · {x.partial_hands} incompletas</small></button>)}</div></aside>
+      <section className="review">{!processing?<div className="empty"><span>◇</span><h2>Selecione ou envie uma sessão</h2><p>A linha do tempo, os clipes e as evidências aparecerão aqui.</p></div>:<>
+        <div className="review-head"><div><p className="eyebrow">SESSÃO {processing.session_id.slice(0,8)}</p><h2>{labels[processing.status]||processing.status}</h2></div>{manifest.metadata&&<div className="meta"><span>{Math.round(manifest.metadata.duration_seconds/60)} min</span><span>{manifest.metadata.video.width}×{manifest.metadata.video.height}</span><span>{manifest.metadata.video.codec}</span></div>}</div>
+        <div className="stepper">{steps.map((s,i)=><div className={i<current?"done":i===current?"current":""} key={s}><i>{i<current?"✓":i+1}</i><span>{labels[s]}</span></div>)}</div>
+        {manifest.hand_detection?.summary&&<div className="summary"><article><strong>{manifest.hand_detection.summary.complete_hands}</strong><span>Mãos completas</span></article><article><strong>{manifest.hand_detection.summary.partial}</strong><span>Em quarentena</span></article><article><strong>{manifest.hand_detection.summary.with_lobby}</strong><span>Com Lobby</span></article><article><strong>{manifest.rabbit_detection?.confirmed_events??0}</strong><span>Coelhos confirmados</span></article></div>}
+        <section className="panel"><div className="panel-title"><div><h3>Linha do tempo e evidências</h3><p>{filtered.length} imagens · evidência visual original</p></div><div className="filters">{["all","table","lobby","transition","unknown"].map(x=><button className={filter===x?"active":""} onClick={()=>setFilter(x)} key={x}>{x==="all"?"Todas":x}</button>)}</div></div><div className="timeline-large">{filtered.map((f:any)=><figure key={f.file}><img src={`/v1/sessions/${processing.session_id}/frames/${f.file}`} alt={`${f.screen_type} em ${f.timestamp_seconds}s`}/><figcaption><b>{f.screen_type}</b><span>{f.timestamp_seconds}s · S{f.segment_id}</span></figcaption></figure>)}</div></section>
+        {clips.length>0&&<section className="panel"><div className="panel-title"><div><h3>Clipes das mãos</h3><p>Reprodução ampliada para revisão pós-sessão</p></div></div><div className="clips-large">{clips.map((c:any)=><article key={c.file}><video controls preload="metadata" src={`/v1/sessions/${processing.session_id}/clips/${c.file}`}/><div><strong>Mão {c.hand_index}</strong><span>{c.partial?"INCOMPLETA · QUARENTENA":"COMPLETA · REVISAR"}</span></div></article>)}</div></section>}
+        {(rabbits.length>0||(manifest.lobby_context??[]).length>0)&&<section className="panel"><div className="panel-title"><div><h3>Contexto e OCR</h3><p>Textos não confirmados permanecem marcados para revisão humana.</p></div></div><div className="evidence-grid">{(manifest.lobby_context??[]).map((e:any,i:number)=><article key={`l${i}`}><img src={`/v1/sessions/${processing.session_id}/frames/${e.representative_frame||e.frames[0]}`} alt="Lobby"/><b>Lobby · {e.start_seconds}s</b><p>{e.ocr?.raw_text||"Texto ainda não reconhecido"}</p><em>Não verificado</em></article>)}{rabbits.map((r:any)=><article key={r.file}><img src={`/v1/sessions/${processing.session_id}/evidence/${r.file}`} alt="Faixa candidata de Coelho"/><b>Coelho · {r.timestamp_seconds}s</b><p>{r.ocr?.raw_text||"Texto não encontrado"}</p><em className={r.confirmed?"confirmed":""}>{r.confirmed?"Confirmado por texto":"Não confirmado"}</em></article>)}</div></section>}
+      </>}</section></section></>}
+    <footer>Coach IA · análise exclusivamente pós-sessão · v2.0</footer></main>;
 }

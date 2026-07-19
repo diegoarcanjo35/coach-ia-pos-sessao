@@ -1,4 +1,5 @@
 import json
+from io import BytesIO
 import logging
 import os
 from pathlib import Path
@@ -8,6 +9,8 @@ import time
 from redis import Redis
 from PIL import Image
 import numpy as np
+import re
+import unicodedata
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 redis = Redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
@@ -18,6 +21,24 @@ def write_manifest(video_path: str, status: str, **details: object) -> None:
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps({"status": status, "updated_at": time.time(), **details}, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(path)
+
+
+def normalize_ocr(value: str) -> str:
+    value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii").upper()
+    return re.sub(r"[^A-Z0-9 ]+", " ", value)
+
+
+def read_evidence_text(image: Image.Image) -> dict[str, object]:
+    enlarged = image.resize((image.width * 3, image.height * 3)).convert("L")
+    payload = BytesIO()
+    enlarged.save(payload, format="PNG")
+    completed = subprocess.run(["tesseract", "stdin", "stdout", "-l", "por+eng", "--psm", "6"],
+                               input=payload.getvalue(), capture_output=True, timeout=30)
+    if completed.returncode:
+        raise RuntimeError("OCR indisponível")
+    raw = completed.stdout.decode("utf-8", errors="replace").strip()
+    return {"raw_text": raw, "normalized_text": " ".join(normalize_ocr(raw).split()),
+            "engine": "tesseract_por_eng_v1"}
 
 
 def probe_video(video_path: str) -> dict[str, object]:
@@ -210,11 +231,28 @@ def build_context_evidence(video_path: str, timeline: list[dict[str, object]]) -
             crop = image.crop((int(width * .18), int(height * .34), int(width * .82), int(height * .46)))
             filename = f"rabbit-banner-{int(item['index']):06d}.jpg"
             crop.save(evidence_dir / filename, quality=88)
+            try:
+                ocr = read_evidence_text(crop)
+            except Exception as exc:
+                ocr = {"raw_text": "", "normalized_text": "", "engine": "unavailable", "error": type(exc).__name__}
+        normalized = str(ocr["normalized_text"])
+        confirmed = "PAGOU" in normalized and "COELHO" in normalized
         rabbit_candidates.append({"timestamp_seconds": item["timestamp_seconds"], "file": filename,
-                                  "status": "pending_ocr", "confirmed": False,
-                                  "policy": "banner_text_required_before_confirmation"})
+                                  "status": "confirmed_text" if confirmed else "unconfirmed", "confirmed": confirmed,
+                                  "ocr": ocr, "policy": "banner_text_required_before_confirmation"})
+    for event in lobby_events:
+        frame_path = session_dir / "frames" / str(event["frames"][0])
+        try:
+            with Image.open(frame_path) as image:
+                event["ocr"] = {**read_evidence_text(image), "verified": False,
+                                "policy": "raw_context_only_requires_review"}
+        except Exception as exc:
+            event["ocr"] = {"raw_text": "", "normalized_text": "", "verified": False,
+                            "engine": "unavailable", "error": type(exc).__name__}
+        event["representative_frame"] = event["frames"][0]
+    confirmed_count = sum(bool(item["confirmed"]) for item in rabbit_candidates)
     return {"lobby_events": lobby_events,
-            "rabbit_detection": {"confirmed_events": 0, "candidates": rabbit_candidates,
+            "rabbit_detection": {"confirmed_events": confirmed_count, "candidates": rabbit_candidates,
                                  "rule": "Only OCR containing PAGOU and COELHO may confirm an event."}}
 
 
@@ -234,13 +272,19 @@ def main() -> None:
             metadata = probe_video(video_path)
             write_manifest(video_path, "segmenting", session_id=job.get("id"), metadata=metadata)
             timeline = extract_timeline(video_path, float(metadata["duration_seconds"]))
+            write_manifest(video_path, "classifying", session_id=job.get("id"), metadata=metadata, timeline=timeline)
             frames_dir = Path(video_path).parent / "frames"
             for item in timeline:
                 result = classify_pppoker_frame(frames_dir / str(item["file"]), item["screen_type"] == "transition")
                 item.update(result)
             counts = {name: sum(item["screen_type"] == name for item in timeline) for name in ("table", "lobby", "transition", "unknown")}
+            common = {"session_id": job.get("id"), "metadata": metadata, "timeline": timeline,
+                      "classification": {"engine": "pppoker_vertical_v220", "counts": counts, "low_confidence_requires_review": True}}
+            write_manifest(video_path, "detecting_hands", **common)
             hand_detection = detect_hand_boundaries(video_path, int(metadata["video"]["width"]), int(metadata["video"]["height"]), float(metadata["duration_seconds"])) if counts["table"] else None
+            write_manifest(video_path, "creating_clips", **common, hand_detection=hand_detection)
             clips = create_hand_clips(video_path, hand_detection["hands"], float(metadata["duration_seconds"])) if hand_detection else []
+            write_manifest(video_path, "reading_context", **common, hand_detection=hand_detection, clips=clips)
             context = build_context_evidence(video_path, timeline)
             write_manifest(video_path, "clips_ready_for_review", session_id=job.get("id"), metadata=metadata, timeline=timeline,
                            segmentation={"interval_seconds": 2, "frame_count": len(timeline),

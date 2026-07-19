@@ -1,4 +1,4 @@
-# Coach IA Pós-Sessão
+# Coach IA Pós-Sessão — v2.0.0
 
 Plataforma pós-sessão para upload e análise de gravações da PPPoker. Não oferece assistência durante partidas.
 
@@ -23,6 +23,9 @@ O deploy usa apenas Git e Docker; não requer o Agent da Abacus.
 - validação técnica assíncrona com `ffprobe` e manifesto por sessão.
 - segmentação temporal a cada 2 segundos com miniaturas de baixo custo;
 - política conservadora `unknown_until_evidenced` antes da classificação PPPoker.
+- dashboard amplo de revisão com progresso por etapa, clipes grandes e galeria de evidências;
+- OCR inicial do Lobby mantido como não verificado e confirmação de Coelho somente quando `PAGOU` e `COELHO` aparecem no texto;
+- separação explícita entre o runout de Coelho e as streets com ação estratégica.
 - pontuação de mudança visual e agrupamento de segmentos por histograma.
 - miniaturas autenticadas e acompanhamento do processamento no dashboard.
 - classificador calibrado para o layout vertical PPPoker v220 com evidências por frame.
