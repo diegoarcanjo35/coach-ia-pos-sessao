@@ -1,4 +1,4 @@
-# Coach IA Pós-Sessão — v3.2.0 AI Calibration
+# Coach IA Pós-Sessão — v3.2.1 AI Progress
 
 SaaS de estudo técnico para gravações encerradas da PPPoker. O sistema não oferece assistência durante partidas e não deve ser utilizado como ferramenta em tempo real.
 
@@ -103,6 +103,14 @@ O roteiro completo de validação está em `INTERNAL_TESTING.md`.
 8. As decisões e observações permanecem salvas após atualizar a página.
 
 ## Evolução recente
+
+### v3.2.1 AI Progress
+
+- progresso persistido por mão durante a extração visual;
+- fases de preparação, espera da OpenAI, validação e conclusão;
+- percentual, contadores de sucesso/erro e estimativa restante;
+- barra animada durante chamadas demoradas;
+- polling do dashboard sem necessidade de atualizar a página.
 
 ### v3.2.0 AI Calibration
 

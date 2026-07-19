@@ -25,7 +25,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Coach IA API", version="3.2.0-ai-calibration", lifespan=lifespan)
+app = FastAPI(title="Coach IA API", version="3.2.1-ai-progress", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],

@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import time
+from collections.abc import Callable
 from typing import Literal
 
 from openai import OpenAI
@@ -131,7 +133,9 @@ def validate_extraction(extraction: HandExtraction, evidence: list[dict[str, obj
             "visual_change_frames":sum(item["selection_reason"]=="visual_change" for item in evidence)}
 
 
-def analyze_hand(video_path: str, hand: dict[str, object], model: str) -> dict[str, object]:
+def analyze_hand(video_path: str, hand: dict[str, object], model: str,
+                 progress_callback: Callable[[str], None] | None = None) -> dict[str, object]:
+    if progress_callback: progress_callback("preparing_frames")
     evidence = extract_hand_frames(video_path, hand)
     content: list[dict[str, object]] = [{"type":"input_text","text":SYSTEM_PROMPT + "\nAnalyze these frames in chronological order."}]
     for item in evidence:
@@ -140,10 +144,12 @@ def analyze_hand(video_path: str, hand: dict[str, object], model: str) -> dict[s
         content.append({"type":"input_text","text":f"Frame {item['file']} at {item['timestamp_seconds']} seconds"})
         content.append({"type":"input_image","image_url":f"data:image/jpeg;base64,{encoded}","detail":"high"})
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], timeout=120, max_retries=2)
+    if progress_callback: progress_callback("waiting_openai")
     response = client.responses.parse(model=model, reasoning={"effort":"low"}, store=False,
                                       input=[{"role":"user","content":content}], text_format=HandExtraction)
     if response.output_parsed is None:
         raise RuntimeError("A IA não retornou extração estruturada")
+    if progress_callback: progress_callback("validating_response")
     calibration=validate_extraction(response.output_parsed,evidence)
     result = response.output_parsed.model_dump(mode="json")
     usage=response.usage.model_dump(mode="json") if response.usage else {}
@@ -151,20 +157,42 @@ def analyze_hand(video_path: str, hand: dict[str, object], model: str) -> dict[s
             "evidence":evidence,"extraction":result,"calibration":calibration,"usage":usage}
 
 
-def analyze_session(video_path: str, hands: list[dict[str, object]]) -> dict[str, object]:
+def analyze_session(video_path: str, hands: list[dict[str, object]],
+                    progress_callback: Callable[[dict[str, object]], None] | None = None) -> dict[str, object]:
     provider = os.getenv("AI_PROVIDER", "none").lower()
     model = os.getenv("AI_MODEL", "gpt-5.6-sol")
     if provider != "openai" or not os.getenv("OPENAI_API_KEY"):
         return {"status":"disabled", "provider":provider, "model":model, "hands":[],
                 "message":"Configure AI_PROVIDER=openai and OPENAI_API_KEY."}
     limit = max(1, min(int(os.getenv("AI_MAX_HANDS_PER_SESSION", "20")), 100))
-    results = []
-    for hand in [item for item in hands if not bool(item.get("partial"))][:limit]:
+    selected_hands=[item for item in hands if not bool(item.get("partial"))][:limit]
+    results=[]; started=time.monotonic()
+    def publish(current:int, phase:str) -> None:
+        if not progress_callback: return
+        completed=len(results); elapsed=time.monotonic()-started
+        average=elapsed/completed if completed else 0
+        remaining=round(average*(len(selected_hands)-completed)) if average else None
+        phase_weight={"preparing_frames":.15,"waiting_openai":.45,"validating_response":.85,"hand_completed":0}.get(phase,0)
+        percent=round(((completed+phase_weight)/max(len(selected_hands),1))*100)
+        progress_callback({"total_hands":len(selected_hands),"completed_hands":completed,"current_hand":current,
+                           "phase":phase,"percent":min(percent,99) if phase!="completed" else 100,
+                           "extracted":sum(x["status"]=="extracted" for x in results),
+                           "errors":sum(x["status"]=="error" for x in results),"eta_seconds":remaining,
+                           "elapsed_seconds":round(elapsed)})
+    if progress_callback: publish(0,"starting")
+    for hand in selected_hands:
+        hand_index=int(hand["index"])
         try:
-            results.append(analyze_hand(video_path, hand, model))
+            results.append(analyze_hand(video_path,hand,model,lambda phase:publish(hand_index,phase)))
         except Exception as exc:
             results.append({"hand_index":hand["index"], "status":"error", "model":model,
                             "error":f"{type(exc).__name__}: {exc}"[:500]})
+        publish(hand_index,"hand_completed")
+    if progress_callback:
+        progress_callback({"total_hands":len(selected_hands),"completed_hands":len(results),"current_hand":None,
+                           "phase":"completed","percent":100,"extracted":sum(x["status"]=="extracted" for x in results),
+                           "errors":sum(x["status"]=="error" for x in results),"eta_seconds":0,
+                           "elapsed_seconds":round(time.monotonic()-started)})
     extracted = sum(item["status"] == "extracted" for item in results)
     input_tokens=sum(int(item.get("usage",{}).get("input_tokens",0)) for item in results)
     output_tokens=sum(int(item.get("usage",{}).get("output_tokens",0)) for item in results)

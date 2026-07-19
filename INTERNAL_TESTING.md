@@ -1,8 +1,8 @@
-# Roteiro de testes internos — v3.2.0
+# Roteiro de testes internos — v3.2.1
 
 ## Preparação
 
-- confirme que o sistema informa `3.2.0-ai-calibration` nos health checks;
+- confirme que o sistema informa `3.2.1-ai-progress` nos health checks;
 - entre com a conta administrativa já configurada na Abacus;
 - nunca compartilhe o `.env` ou a senha administrativa;
 - crie uma conta individual para cada testador.
@@ -47,6 +47,7 @@
 7. Registre qualquer divergência com o frame e a mão correspondentes.
 8. Confira o relatório de calibração e as inconsistências determinísticas.
 9. Verifique se boards inválidos ou cartas duplicadas forçam revisão.
+10. Durante a espera, confirme que fase, percentual e animação continuam visíveis.
 
 ## Gestão e exportação
 
