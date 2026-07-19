@@ -176,11 +176,46 @@ def create_hand_clips(video_path: str, hands: list[dict[str, object]], duration:
         end = min(duration, float(hand["end_seconds"]))
         output = output_dir / f"hand-{int(hand['index']):03d}.mp4"
         subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", str(start), "-i", video_path,
-                        "-t", str(max(.5, end - start)), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "24",
-                        "-movflags", "+faststart", str(output)], check=True, capture_output=True, text=True, timeout=max(180, int((end-start)*3)))
+                        "-t", str(max(.5, end - start)), "-map", "0:v:0", "-an", "-c:v", "copy",
+                        "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", str(output)],
+                       check=True, capture_output=True, text=True, timeout=180)
         clips.append({"hand_index": hand["index"], "file": output.name, "start_seconds": round(start, 3), "end_seconds": round(end, 3),
                       "partial": hand["partial"], "publishable": not hand["partial"]})
     return clips
+
+
+def build_context_evidence(video_path: str, timeline: list[dict[str, object]]) -> dict[str, object]:
+    lobby_frames = [item for item in timeline if item["screen_type"] == "lobby"]
+    lobby_events: list[dict[str, object]] = []
+    for item in lobby_frames:
+        timestamp = float(item["timestamp_seconds"])
+        if not lobby_events or timestamp - float(lobby_events[-1]["end_seconds"]) > 2.1:
+            lobby_events.append({"start_seconds": timestamp, "end_seconds": timestamp + 2.0, "frames": [item["file"]]})
+        else:
+            lobby_events[-1]["end_seconds"] = timestamp + 2.0
+            lobby_events[-1]["frames"].append(item["file"])
+    for event in lobby_events:
+        event["duration_seconds"] = round(float(event["end_seconds"]) - float(event["start_seconds"]), 3)
+
+    session_dir = Path(video_path).parent
+    evidence_dir = session_dir / "evidence"
+    evidence_dir.mkdir(exist_ok=True)
+    rabbit_candidates: list[dict[str, object]] = []
+    for item in timeline:
+        if item["screen_type"] != "table" or not (int(item["index"]) % 5 == 0 or float(item["change_score"]) >= .08):
+            continue
+        frame_path = session_dir / "frames" / str(item["file"])
+        with Image.open(frame_path) as image:
+            width, height = image.size
+            crop = image.crop((int(width * .18), int(height * .34), int(width * .82), int(height * .46)))
+            filename = f"rabbit-banner-{int(item['index']):06d}.jpg"
+            crop.save(evidence_dir / filename, quality=88)
+        rabbit_candidates.append({"timestamp_seconds": item["timestamp_seconds"], "file": filename,
+                                  "status": "pending_ocr", "confirmed": False,
+                                  "policy": "banner_text_required_before_confirmation"})
+    return {"lobby_events": lobby_events,
+            "rabbit_detection": {"confirmed_events": 0, "candidates": rabbit_candidates,
+                                 "rule": "Only OCR containing PAGOU and COELHO may confirm an event."}}
 
 
 def main() -> None:
@@ -206,13 +241,15 @@ def main() -> None:
             counts = {name: sum(item["screen_type"] == name for item in timeline) for name in ("table", "lobby", "transition", "unknown")}
             hand_detection = detect_hand_boundaries(video_path, int(metadata["video"]["width"]), int(metadata["video"]["height"]), float(metadata["duration_seconds"])) if counts["table"] else None
             clips = create_hand_clips(video_path, hand_detection["hands"], float(metadata["duration_seconds"])) if hand_detection else []
+            context = build_context_evidence(video_path, timeline)
             write_manifest(video_path, "clips_ready_for_review", session_id=job.get("id"), metadata=metadata, timeline=timeline,
                            segmentation={"interval_seconds": 2, "frame_count": len(timeline),
                                          "segment_count": max((int(item["segment_id"]) for item in timeline), default=0),
                                          "transition_threshold": 0.18, "policy": "unknown_until_evidenced"},
                            classification={"engine": "pppoker_vertical_v220", "counts": counts, "low_confidence_requires_review": True},
-                           hand_detection=hand_detection, clips=clips)
-            logging.info("Vídeo segmentado: %s (%s frames)", job.get("id"), len(timeline))
+                           hand_detection=hand_detection, clips=clips,
+                           lobby_context=context["lobby_events"], rabbit_detection=context["rabbit_detection"])
+            logging.info("Processamento concluído: %s (%s frames, %s clipes)", job.get("id"), len(timeline), len(clips))
         except Exception as exc:
             write_manifest(video_path, "failed", session_id=job.get("id"), error=str(exc))
             logging.exception("Falha ao validar vídeo %s", job.get("id"))

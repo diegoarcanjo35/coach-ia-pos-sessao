@@ -7,3 +7,11 @@
 .clips article { display:grid; gap:6px; }
 .clips video { width:100%; max-height:280px; border-radius:8px; background:#05070b; }
 .clips span { font-size:11px; color:var(--muted); }
+.loading { padding:80px 0; color:var(--muted); }
+.logout { width:auto; margin-left:8px; padding:8px 12px; background:#171c27; border:1px solid var(--line); }
+.history { margin:28px 0 50px; }
+.history h2 { font-size:20px; }
+.history-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.history-grid button { display:grid; gap:6px; text-align:left; background:var(--card); border:1px solid var(--line); padding:16px; }
+.history-grid span,.history-grid small { color:var(--muted); font-size:11px; }
+@media(max-width:800px){.history-grid{grid-template-columns:1fr}.logout{margin-left:auto}}

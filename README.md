@@ -28,6 +28,18 @@ O deploy usa apenas Git e Docker; não requer o Agent da Abacus.
 - classificador calibrado para o layout vertical PPPoker v220 com evidências por frame.
 - detector pós-sessão de início/fim de mãos a 2 FPS, preservando interrupções de Lobby.
 - clipes individuais com pré-roll de 3 segundos e quarentena de candidatos incompletos.
+- histórico persistente no PostgreSQL, restauração de login e evidências de Lobby/Coelho.
 
 O pipeline de visão computacional ainda é um adaptador seguro: ele registra o trabalho,
 mas não inventa mãos ou decisões até que os detectores validados sejam integrados.
+
+## Lote v1.5
+
+- restauração automática do login após atualizar a página;
+- logout e cookie HttpOnly com duração de 12 horas;
+- sessões persistidas no PostgreSQL e importação dos uploads antigos;
+- histórico das 50 sessões mais recentes e retomada do painel;
+- clipes rápidos por keyframe, quarentena e reprodução autenticada;
+- eventos de Lobby agrupados por intervalo;
+- recortes de evidência para “pagou o Coelho”, sempre pendentes de OCR;
+- nenhuma evidência de Coelho é confirmada apenas por mudança visual.
