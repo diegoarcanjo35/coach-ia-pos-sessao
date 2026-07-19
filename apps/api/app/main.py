@@ -25,7 +25,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Coach IA API", version="2.1.0", lifespan=lifespan)
+app = FastAPI(title="Coach IA API", version="2.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -91,6 +91,14 @@ class SessionSummary(Session):
     partial_hands: int = 0
 
 
+class ReviewState(BaseModel):
+    notes: str = Field(default="", max_length=4000)
+    hands: dict[str, Literal["approved", "rejected"]] = Field(default_factory=dict)
+    lobby: dict[str, Literal["confirmed", "rejected"]] = Field(default_factory=dict)
+    rabbits: dict[str, Literal["confirmed", "rejected"]] = Field(default_factory=dict)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 def initialize_app_data() -> None:
     initialize_database()
     with SessionLocal() as database:
@@ -115,6 +123,10 @@ def read_manifest(session_id: UUID) -> dict[str, object] | None:
     path = UPLOAD_DIR / str(session_id) / "manifest.json"
     if not path.exists():
         return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def ensure_session_owner(session_id: UUID, user: str, database: DatabaseSession) -> SessionRecord:
@@ -122,10 +134,10 @@ def ensure_session_owner(session_id: UUID, user: str, database: DatabaseSession)
     if record is None or record.owner_email != user:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
     return record
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+
+
+def review_path(session_id: UUID) -> Path:
+    return UPLOAD_DIR / str(session_id) / "review.json"
 
 
 @app.get("/health")
@@ -199,6 +211,30 @@ def processing_status(session_id: UUID, user: str = Depends(require_user), datab
     except (OSError, json.JSONDecodeError):
         raise HTTPException(status_code=503, detail="Manifesto temporariamente indisponível") from None
     return ProcessingStatus(session_id=session_id, status=str(manifest.get("status", "unknown")), manifest=manifest)
+
+
+@app.get("/v1/sessions/{session_id}/review", response_model=ReviewState)
+def get_review(session_id: UUID, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> ReviewState:
+    ensure_session_owner(session_id, user, database)
+    path = review_path(session_id)
+    if not path.exists():
+        return ReviewState()
+    try:
+        return ReviewState.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise HTTPException(status_code=503, detail="Revisão temporariamente indisponível") from None
+
+
+@app.post("/v1/sessions/{session_id}/review", response_model=ReviewState)
+def save_review(session_id: UUID, review: ReviewState, user: str = Depends(require_user), database: DatabaseSession = Depends(get_database)) -> ReviewState:
+    ensure_session_owner(session_id, user, database)
+    review.updated_at = datetime.now(timezone.utc)
+    path = review_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(review.model_dump_json(indent=2), encoding="utf-8")
+    temporary.replace(path)
+    return review
 
 
 @app.get("/v1/sessions/{session_id}/frames/{filename}")

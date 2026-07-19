@@ -24,3 +24,20 @@
 .context-fields span { display: grid; gap: 3px; padding: 9px; border-radius: 8px; background: #151b25; font-size: 13px; }
 .context-fields small { color: var(--muted); font-size: 8px; text-transform: uppercase; letter-spacing: .08em; }
 @media (max-width: 760px) { .clip-info { grid-template-columns: 1fr !important; } .clip-info span { text-align: left; } }
+.notes-panel { display: grid; gap: 12px; }
+.notes-panel h3, .notes-panel p { margin: 0 0 5px; }
+.notes-panel p { color: var(--muted); font-size: 11px; }
+.notes-panel textarea { min-height: 105px; resize: vertical; background: #090c12; border: 1px solid var(--line); border-radius: 10px; color: white; padding: 13px; font: inherit; }
+.notes-panel > div:last-child { display: flex; justify-content: flex-end; align-items: center; gap: 12px; }
+.notes-panel > div:last-child span { color: var(--muted); font-size: 10px; }
+.notes-panel button { width: auto; }
+.review-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 0 12px 12px; }
+.review-actions button { padding: 9px; background: #171d27; color: var(--muted); border: 1px solid var(--line); font-size: 10px; }
+.review-actions .approve.selected { background: #134e48; border-color: #238276; color: #6ee7d2; }
+.review-actions .reject.selected { background: #57242f; border-color: #8d3b4d; color: #fda4af; }
+.decision-queue { display: grid; gap: 8px; }
+.decision-queue > article { display: grid; grid-template-columns: 1fr 360px; align-items: center; gap: 16px; padding: 10px 12px; background: #0b0e14; border: 1px solid var(--line); border-radius: 10px; }
+.decision-queue > article > div:first-child { display: grid; gap: 4px; }
+.decision-queue small { color: var(--muted); font-size: 9px; }
+.decision-queue .review-actions { padding: 0; }
+@media (max-width: 760px) { .decision-queue > article { grid-template-columns: 1fr; } }
