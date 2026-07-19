@@ -41,6 +41,26 @@ def read_evidence_text(image: Image.Image) -> dict[str, object]:
             "engine": "tesseract_por_eng_v1"}
 
 
+def extract_lobby_candidates(text: str) -> dict[str, object]:
+    """Extract only labeled tournament context; every value remains unverified."""
+    normalized = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").upper()
+    result: dict[str, object] = {"verified": False, "source": "ocr"}
+    players = re.search(r"(?:JOGADORES|PLAYERS)[^0-9]{0,24}(\d{1,5})\s*/\s*(\d{1,5})", normalized)
+    average = re.search(r"(?:STACK MEDIO|MEDIA DE FICHAS|AVERAGE STACK)[^0-9]{0,24}([0-9]+(?:[.,][0-9]+)?)\s*BB", normalized)
+    prize = re.search(r"(?:PREMIO|PREMIACAO|PRIZE)[^0-9]{0,24}([0-9][0-9.,]*)", normalized)
+    remaining = re.search(r"(?:RESTANTES|REMAINING|LEFT)[^0-9]{0,16}(\d{1,5})", normalized)
+    if players:
+        result["players_current"], result["players_total"] = int(players.group(1)), int(players.group(2))
+    if average:
+        result["average_stack_bb"] = average.group(1).replace(",", ".")
+    if prize:
+        result["prize_text"] = prize.group(1)
+    if remaining:
+        result["players_remaining"] = int(remaining.group(1))
+    result["fields_found"] = len(result) - 2
+    return result
+
+
 def probe_video(video_path: str) -> dict[str, object]:
     completed = subprocess.run(
         ["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", video_path],
@@ -248,6 +268,7 @@ def build_context_evidence(video_path: str, timeline: list[dict[str, object]]) -
             with Image.open(frame_path) as image:
                 event["ocr"] = {**read_evidence_text(image), "verified": False,
                                 "policy": "raw_context_only_requires_review"}
+                event["candidates"] = extract_lobby_candidates(str(event["ocr"]["raw_text"]))
         except Exception as exc:
             event["ocr"] = {"raw_text": "", "normalized_text": "", "verified": False,
                             "engine": "unavailable", "error": type(exc).__name__}
