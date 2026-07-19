@@ -20,6 +20,7 @@ O deploy usa apenas Git e Docker; não requer o Agent da Abacus.
 - dashboard inicial sem qualquer assistência durante partidas.
 - acesso administrativo protegido por cookie HttpOnly;
 - upload autenticado e limitado por tamanho.
+- validação técnica assíncrona com `ffprobe` e manifesto por sessão.
 
 O pipeline de visão computacional ainda é um adaptador seguro: ele registra o trabalho,
 mas não inventa mãos ou decisões até que os detectores validados sejam integrados.

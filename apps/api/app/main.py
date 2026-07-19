@@ -67,6 +67,12 @@ class Session(BaseModel):
     original_filename: str | None = None
 
 
+class ProcessingStatus(BaseModel):
+    session_id: UUID
+    status: str
+    manifest: dict[str, object] | None = None
+
+
 SESSIONS: dict[UUID, Session] = {}
 
 
@@ -111,6 +117,21 @@ def get_session(session_id: UUID, _user: str = Depends(require_user)) -> Session
     if session is None:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
     return session
+
+
+@app.get("/v1/sessions/{session_id}/processing", response_model=ProcessingStatus)
+def processing_status(session_id: UUID, _user: str = Depends(require_user)) -> ProcessingStatus:
+    directory = UPLOAD_DIR / str(session_id)
+    if not directory.exists():
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    manifest_path = directory / "manifest.json"
+    if not manifest_path.exists():
+        return ProcessingStatus(session_id=session_id, status="queued")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raise HTTPException(status_code=503, detail="Manifesto temporariamente indisponível") from None
+    return ProcessingStatus(session_id=session_id, status=str(manifest.get("status", "unknown")), manifest=manifest)
 
 
 @app.post("/v1/uploads", response_model=Session, status_code=202)
