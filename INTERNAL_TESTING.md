@@ -1,8 +1,8 @@
-# Roteiro de testes internos — v3.1.0
+# Roteiro de testes internos — v3.2.0
 
 ## Preparação
 
-- confirme que o sistema informa `3.1.0-ai-alpha` nos health checks;
+- confirme que o sistema informa `3.2.0-ai-calibration` nos health checks;
 - entre com a conta administrativa já configurada na Abacus;
 - nunca compartilhe o `.env` ou a senha administrativa;
 - crie uma conta individual para cada testador.
@@ -45,6 +45,8 @@
 5. Trate confiança baixa e `unknown` como comportamento correto quando a imagem estiver ambígua.
 6. Confirme que cartas do Coelho não aparecem como streets com ação.
 7. Registre qualquer divergência com o frame e a mão correspondentes.
+8. Confira o relatório de calibração e as inconsistências determinísticas.
+9. Verifique se boards inválidos ou cartas duplicadas forçam revisão.
 
 ## Gestão e exportação
 

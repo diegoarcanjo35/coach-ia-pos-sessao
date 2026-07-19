@@ -1,4 +1,4 @@
-# Coach IA Pós-Sessão — v3.1.0 AI Alpha
+# Coach IA Pós-Sessão — v3.2.0 AI Calibration
 
 SaaS de estudo técnico para gravações encerradas da PPPoker. O sistema não oferece assistência durante partidas e não deve ser utilizado como ferramenta em tempo real.
 
@@ -103,6 +103,19 @@ O roteiro completo de validação está em `INTERNAL_TESTING.md`.
 8. As decisões e observações permanecem salvas após atualizar a página.
 
 ## Evolução recente
+
+### v3.2.0 AI Calibration
+
+- seleção adaptativa de até 9 frames por mão, configurável até 12;
+- frames de fronteira, quartis e maiores mudanças visuais;
+- validação de cartas duplicadas e colisões Hero/board;
+- validação de contagem e progressão do board;
+- verificação das referências de evidência;
+- score determinístico de completude;
+- redução automática de confiança quando há inconsistências;
+- relatório de calibração no dashboard;
+- contabilização de tokens de entrada e saída;
+- metadados do critério de seleção em cada frame.
 
 ### v3.1.0 AI Alpha
 

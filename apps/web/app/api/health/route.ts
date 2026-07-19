@@ -1,3 +1,3 @@
 export function GET() {
-  return Response.json({ status: "ok", service: "coach-ia-web", version: "3.1.0-ai-alpha" });
+  return Response.json({ status: "ok", service: "coach-ia-web", version: "3.2.0-ai-calibration" });
 }
