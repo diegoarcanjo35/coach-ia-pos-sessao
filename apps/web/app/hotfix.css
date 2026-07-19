@@ -1,0 +1,11 @@
+.evidence-grid {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  align-items: start;
+}
+.evidence-grid article { align-self: start; gap: 10px; }
+.evidence-grid img { height: 260px; max-height: none; object-fit: contain; }
+.evidence-grid details { border-top: 1px solid var(--line); padding-top: 9px; }
+.evidence-grid summary { cursor: pointer; color: #aab4c3; font-size: 11px; }
+.evidence-grid details p { max-height: 180px; min-height: 0; overflow: auto; }
+.evidence-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.evidence-meta span { padding: 6px 8px; border-radius: 7px; background: #171d28; color: #9da8b8; font-size: 9px; }

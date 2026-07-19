@@ -237,9 +237,11 @@ def build_context_evidence(video_path: str, timeline: list[dict[str, object]]) -
                 ocr = {"raw_text": "", "normalized_text": "", "engine": "unavailable", "error": type(exc).__name__}
         normalized = str(ocr["normalized_text"])
         confirmed = "PAGOU" in normalized and "COELHO" in normalized
-        rabbit_candidates.append({"timestamp_seconds": item["timestamp_seconds"], "file": filename,
-                                  "status": "confirmed_text" if confirmed else "unconfirmed", "confirmed": confirmed,
-                                  "ocr": ocr, "policy": "banner_text_required_before_confirmation"})
+        textual_signal = "PAGOU" in normalized or "COELHO" in normalized
+        if textual_signal:
+            rabbit_candidates.append({"timestamp_seconds": item["timestamp_seconds"], "file": filename,
+                                      "status": "confirmed_text" if confirmed else "partial_text", "confirmed": confirmed,
+                                      "ocr": ocr, "policy": "banner_text_required_before_confirmation"})
     for event in lobby_events:
         frame_path = session_dir / "frames" / str(event["frames"][0])
         try:
@@ -253,6 +255,8 @@ def build_context_evidence(video_path: str, timeline: list[dict[str, object]]) -
     confirmed_count = sum(bool(item["confirmed"]) for item in rabbit_candidates)
     return {"lobby_events": lobby_events,
             "rabbit_detection": {"confirmed_events": confirmed_count, "candidates": rabbit_candidates,
+                                 "scanned_frames": sum(1 for item in timeline if item["screen_type"] == "table" and
+                                                       (int(item["index"]) % 5 == 0 or float(item["change_score"]) >= .08)),
                                  "rule": "Only OCR containing PAGOU and COELHO may confirm an event."}}
 
 
